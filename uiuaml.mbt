@@ -442,10 +442,16 @@ priv struct Closure {
 }
 
 ///|
+priv struct UiArray {
+  shape : Array[Int]
+  data : Array[Value]
+}
+
+///|
 priv enum Value {
   Num(Double)
   Bool(Bool)
-  Array(Array[Value])
+  Array(UiArray)
   Closure(Closure)
   Builtin(String, Int, Array[Value])
 }
@@ -485,7 +491,7 @@ fn eval(expr : Expr, env : Env) -> Value raise UiuaMLError {
       for item in items {
         values.push(eval(item, env))
       }
-      Value::Array(values)
+      array_from_items(values)
     }
     Expr::Let(name, value_expr, body) => {
       let next_env = env.copy()
@@ -511,7 +517,7 @@ fn truthy(value : Value) -> Bool {
   match value {
     Value::Bool(b) => b
     Value::Num(n) => n != 0.0
-    Value::Array(items) => !items.is_empty()
+    Value::Array(array) => array.element_count() != 0
     Value::Closure(_) | Value::Builtin(_, _, _) => true
   }
 }
@@ -578,12 +584,12 @@ fn ordering_compare_error(_lhs : Value, _rhs : Value) -> Bool raise UiuaMLError 
 fn negate_bools(value : Value) -> Value raise UiuaMLError {
   match value {
     Value::Bool(b) => Value::Bool(!b)
-    Value::Array(items) => {
-      let result = Array::new(capacity=items.length())
-      for item in items {
+    Value::Array(array) => {
+      let result = Array::new(capacity=array.element_count())
+      for item in array.data {
         result.push(negate_bools(item))
       }
-      Value::Array(result)
+      Value::Array(UiArray::{ shape: array.shape, data: result })
     }
     _ => fail("Expected boolean result")
   }
@@ -596,12 +602,12 @@ fn broadcast_unary(
 ) -> Value raise UiuaMLError {
   match value {
     Value::Num(n) => f(n)
-    Value::Array(items) => {
-      let result = Array::new(capacity=items.length())
-      for item in items {
+    Value::Array(array) => {
+      let result = Array::new(capacity=array.element_count())
+      for item in array.data {
         result.push(broadcast_unary(item, f))
       }
-      Value::Array(result)
+      Value::Array(UiArray::{ shape: array.shape, data: result })
     }
     _ => fail("Numeric operation expects numbers or arrays of numbers")
   }
@@ -613,36 +619,12 @@ fn broadcast_numeric(
   rhs : Value,
   f : (Double, Double) -> Double,
 ) -> Value raise UiuaMLError {
-  match (lhs, rhs) {
-    (Value::Num(a), Value::Num(b)) => Value::Num(f(a, b))
-    (Value::Array(xs), Value::Array(ys)) => {
-      guard xs.length() == ys.length() else {
-        fail("Array length mismatch: \{xs.length()} vs \{ys.length()}")
-      }
-      let result = Array::new(capacity=xs.length())
-      let mut i = 0
-      while i < xs.length() {
-        result.push(broadcast_numeric(xs[i], ys[i], f))
-        i = i + 1
-      }
-      Value::Array(result)
+  pervade(lhs, rhs, (left, right) => {
+    guard left is Value::Num(a) && right is Value::Num(b) else {
+      fail("Numeric operation expects numbers or arrays of numbers")
     }
-    (Value::Array(xs), other) => {
-      let result = Array::new(capacity=xs.length())
-      for item in xs {
-        result.push(broadcast_numeric(item, other, f))
-      }
-      Value::Array(result)
-    }
-    (other, Value::Array(ys)) => {
-      let result = Array::new(capacity=ys.length())
-      for item in ys {
-        result.push(broadcast_numeric(other, item, f))
-      }
-      Value::Array(result)
-    }
-    _ => fail("Numeric operation expects numbers or arrays of numbers")
-  }
+    Value::Num(f(a, b))
+  })
 }
 
 ///|
@@ -652,36 +634,127 @@ fn broadcast_compare(
   number_cmp : (Double, Double) -> Bool,
   scalar_cmp : (Value, Value) -> Bool raise UiuaMLError,
 ) -> Value raise UiuaMLError {
+  pervade(lhs, rhs, (left, right) => {
+    match (left, right) {
+      (Value::Num(a), Value::Num(b)) => Value::Bool(number_cmp(a, b))
+      _ => Value::Bool(scalar_cmp(left, right))
+    }
+  })
+}
+
+///|
+fn pervade(
+  lhs : Value,
+  rhs : Value,
+  op_scalar : (Value, Value) -> Value raise UiuaMLError,
+) -> Value raise UiuaMLError {
   match (lhs, rhs) {
-    (Value::Num(a), Value::Num(b)) => Value::Bool(number_cmp(a, b))
-    (Value::Array(xs), Value::Array(ys)) => {
-      guard xs.length() == ys.length() else {
-        fail("Array length mismatch: \{xs.length()} vs \{ys.length()}")
-      }
-      let result = Array::new(capacity=xs.length())
-      let mut i = 0
-      while i < xs.length() {
-        result.push(broadcast_compare(xs[i], ys[i], number_cmp, scalar_cmp))
-        i = i + 1
-      }
-      Value::Array(result)
-    }
-    (Value::Array(xs), other) => {
-      let result = Array::new(capacity=xs.length())
-      for item in xs {
-        result.push(broadcast_compare(item, other, number_cmp, scalar_cmp))
-      }
-      Value::Array(result)
-    }
-    (other, Value::Array(ys)) => {
-      let result = Array::new(capacity=ys.length())
-      for item in ys {
-        result.push(broadcast_compare(other, item, number_cmp, scalar_cmp))
-      }
-      Value::Array(result)
-    }
-    _ => Value::Bool(scalar_cmp(lhs, rhs))
+    (Value::Array(left), Value::Array(right)) =>
+      pervade_arrays(left, right, op_scalar)
+    (Value::Array(array), scalar) => map_array_left(array, scalar, op_scalar)
+    (scalar, Value::Array(array)) => map_array_right(scalar, array, op_scalar)
+    _ => op_scalar(lhs, rhs)
   }
+}
+
+///|
+fn map_array_left(
+  array : UiArray,
+  scalar : Value,
+  op_scalar : (Value, Value) -> Value raise UiuaMLError,
+) -> Value raise UiuaMLError {
+  let data = Array::new(capacity=array.element_count())
+  for item in array.data {
+    data.push(op_scalar(item, scalar))
+  }
+  Value::Array(UiArray::{ shape: array.shape, data })
+}
+
+///|
+fn map_array_right(
+  scalar : Value,
+  array : UiArray,
+  op_scalar : (Value, Value) -> Value raise UiuaMLError,
+) -> Value raise UiuaMLError {
+  let data = Array::new(capacity=array.element_count())
+  for item in array.data {
+    data.push(op_scalar(scalar, item))
+  }
+  Value::Array(UiArray::{ shape: array.shape, data })
+}
+
+///|
+fn pervade_arrays(
+  lhs : UiArray,
+  rhs : UiArray,
+  op_scalar : (Value, Value) -> Value raise UiuaMLError,
+) -> Value raise UiuaMLError {
+  if lhs.shape == rhs.shape {
+    let data = Array::new(capacity=lhs.element_count())
+    let mut i = 0
+    while i < lhs.element_count() {
+      data.push(op_scalar(lhs.data[i], rhs.data[i]))
+      i = i + 1
+    }
+    return Value::Array(UiArray::{ shape: lhs.shape, data })
+  }
+  if shape_is_prefix(lhs.shape, rhs.shape) {
+    let chunk = suffix_element_count(rhs.shape, lhs.rank())
+    let data = Array::new(capacity=rhs.element_count())
+    let mut i = 0
+    while i < lhs.element_count() {
+      let mut j = 0
+      while j < chunk {
+        data.push(op_scalar(lhs.data[i], rhs.data[i * chunk + j]))
+        j = j + 1
+      }
+      i = i + 1
+    }
+    return Value::Array(UiArray::{ shape: rhs.shape, data })
+  }
+  if shape_is_prefix(rhs.shape, lhs.shape) {
+    let chunk = suffix_element_count(lhs.shape, rhs.rank())
+    let data = Array::new(capacity=lhs.element_count())
+    let mut i = 0
+    while i < rhs.element_count() {
+      let mut j = 0
+      while j < chunk {
+        data.push(op_scalar(lhs.data[i * chunk + j], rhs.data[i]))
+        j = j + 1
+      }
+      i = i + 1
+    }
+    return Value::Array(UiArray::{ shape: lhs.shape, data })
+  }
+  fail(
+    "Shape mismatch: \{render_shape(lhs.shape)} vs \{render_shape(rhs.shape)}",
+  )
+}
+
+///|
+fn shape_is_prefix(prefix : Array[Int], shape : Array[Int]) -> Bool {
+  if prefix.length() > shape.length() {
+    return false
+  }
+  let mut i = 0
+  while i < prefix.length() {
+    if prefix[i] != shape[i] {
+      return false
+    }
+    i = i + 1
+  }
+  true
+}
+
+///|
+fn suffix_element_count(shape : Array[Int], start : Int) -> Int {
+  element_count_for_shape(shape[start:].to_owned())
+}
+
+///|
+fn render_shape(shape : Array[Int]) -> String {
+  let body = shape.map(n => n.to_string()).join(" ")
+  "[\{body}]"
 }
 
 ///|
@@ -690,12 +763,12 @@ fn deep_equal(lhs : Value, rhs : Value) -> Bool raise UiuaMLError {
     (Value::Num(a), Value::Num(b)) => a == b
     (Value::Bool(a), Value::Bool(b)) => a == b
     (Value::Array(xs), Value::Array(ys)) => {
-      if xs.length() != ys.length() {
+      if xs.shape != ys.shape || xs.element_count() != ys.element_count() {
         return false
       }
       let mut i = 0
-      while i < xs.length() {
-        if !deep_equal(xs[i], ys[i]) {
+      while i < xs.element_count() {
+        if !deep_equal(xs.data[i], ys.data[i]) {
           return false
         }
         i = i + 1
@@ -732,22 +805,27 @@ fn builtin_range(arg : Value) -> Value raise UiuaMLError {
     items.push(Value::Num(Double::from_int(i)))
     i = i + 1
   }
-  Value::Array(items)
+  make_array([n], items)
 }
 
 ///|
 fn builtin_shape(arg : Value) -> Value raise UiuaMLError {
-  Value::Array(infer_shape(arg).map(n => Value::Num(Double::from_int(n))))
+  let dims = infer_shape(arg)
+  let data = Array::new(capacity=dims.length())
+  for dim in dims {
+    data.push(Value::Num(Double::from_int(dim)))
+  }
+  make_array([data.length()], data)
 }
 
 ///|
 fn builtin_first(arg : Value) -> Value raise UiuaMLError {
   match arg {
-    Value::Array(items) =>
-      if items.is_empty() {
+    Value::Array(array) =>
+      if array.row_count() == 0 {
         fail("first expects a non-empty array")
       } else {
-        items[0]
+        array.row_value(0)
       }
     _ => fail("first expects an array")
   }
@@ -756,29 +834,23 @@ fn builtin_first(arg : Value) -> Value raise UiuaMLError {
 ///|
 fn builtin_reverse(arg : Value) -> Value raise UiuaMLError {
   match arg {
-    Value::Array(items) => Value::Array(items.rev())
+    Value::Array(array) => Value::Array(array.reversed())
     _ => fail("reverse expects an array")
   }
 }
 
 ///|
-fn builtin_len(arg : Value) -> Value raise UiuaMLError {
+fn builtin_len(arg : Value) -> Value {
   match arg {
-    Value::Array(items) => Value::Num(Double::from_int(items.length()))
-    _ => fail("len expects an array")
+    Value::Array(array) => Value::Num(Double::from_int(array.row_count()))
+    _ => Value::Num(1.0)
   }
 }
 
 ///|
 fn builtin_append(lhs : Value, rhs : Value) -> Value raise UiuaMLError {
   match (lhs, rhs) {
-    (Value::Array(xs), Value::Array(ys)) => {
-      let result = xs.copy()
-      for item in ys {
-        result.push(item)
-      }
-      Value::Array(result)
-    }
+    (Value::Array(xs), Value::Array(ys)) => Value::Array(xs.append_rows(ys))
     _ => fail("append expects two arrays")
   }
 }
@@ -789,42 +861,30 @@ fn builtin_reshape(
   data_value : Value,
 ) -> Value raise UiuaMLError {
   let shape = shape_to_dims(shape_value)
-  let flat = flatten(data_value)
+  let flat = flat_values(data_value)
   guard !flat.is_empty() else { fail("reshape cannot use empty data") }
-  let pair = build_shape(shape, flat, 0)
-  pair.0
-}
-
-///|
-fn build_shape(
-  shape : Array[Int],
-  flat : Array[Value],
-  start : Int,
-) -> (Value, Int) {
+  let count = element_count_for_shape(shape)
   if shape.is_empty() {
-    (flat[start % flat.length()], start + 1)
-  } else {
-    let size = shape[0]
-    let rest = shape[1:].to_owned()
-    let items = Array::new(capacity=size)
-    let mut next = start
-    let mut i = 0
-    while i < size {
-      let pair = build_shape(rest, flat, next)
-      items.push(pair.0)
-      next = pair.1
-      i = i + 1
-    }
-    (Value::Array(items), next)
+    return flat[0]
   }
+  let data = Array::new(capacity=count)
+  let mut i = 0
+  while i < count {
+    data.push(flat[i % flat.length()])
+    i = i + 1
+  }
+  make_array(shape, data)
 }
 
 ///|
 fn shape_to_dims(value : Value) -> Array[Int] raise UiuaMLError {
   match value {
-    Value::Array(items) => {
-      let dims = Array::new(capacity=items.length())
-      for item in items {
+    Value::Array(array) => {
+      guard array.rank() <= 1 else {
+        fail("reshape expects shape to be a vector of integers")
+      }
+      let dims = Array::new(capacity=array.element_count())
+      for item in array.data {
         dims.push(as_nat(item))
       }
       dims
@@ -834,43 +894,17 @@ fn shape_to_dims(value : Value) -> Array[Int] raise UiuaMLError {
 }
 
 ///|
-fn infer_shape(value : Value) -> Array[Int] raise UiuaMLError {
+fn infer_shape(value : Value) -> Array[Int] {
   match value {
-    Value::Array(items) => {
-      let dims = [items.length()]
-      if items.is_empty() {
-        return dims
-      }
-      let child_shape = infer_shape(items[0])
-      let mut i = 1
-      while i < items.length() {
-        guard child_shape == infer_shape(items[i]) else {
-          fail("shape expects rectangular arrays")
-        }
-        i = i + 1
-      }
-      let result = dims.copy()
-      for dim in child_shape {
-        result.push(dim)
-      }
-      result
-    }
+    Value::Array(array) => array.shape
     _ => []
   }
 }
 
 ///|
-fn flatten(value : Value) -> Array[Value] {
+fn flat_values(value : Value) -> Array[Value] {
   match value {
-    Value::Array(items) => {
-      let result = Array::new()
-      for item in items {
-        for inner in flatten(item) {
-          result.push(inner)
-        }
-      }
-      result
-    }
+    Value::Array(array) => array.data
     _ => [value]
   }
 }
@@ -879,10 +913,167 @@ fn flatten(value : Value) -> Array[Value] {
 fn sum_numbers(value : Value) -> Double raise UiuaMLError {
   match value {
     Value::Num(n) => n
-    Value::Array(items) =>
-      items.fold(init=0.0, (acc, item) => acc + sum_numbers(item))
+    Value::Bool(_) => fail("sum expects numbers or arrays of numbers")
+    Value::Array(array) =>
+      array.data.fold(init=0.0, (acc, item) => acc + sum_numbers(item))
     _ => fail("sum expects numbers or arrays of numbers")
   }
+}
+
+///|
+fn make_array(
+  shape : Array[Int],
+  data : Array[Value],
+) -> Value raise UiuaMLError {
+  validate_shape(shape, data.length())
+  Value::Array(UiArray::{ shape, data })
+}
+
+///|
+fn validate_shape(shape : Array[Int], len : Int) -> Unit raise UiuaMLError {
+  guard element_count_for_shape(shape) == len else {
+    fail("Shape \{render_shape(shape)} does not match element count \{len}")
+  }
+}
+
+///|
+fn element_count_for_shape(shape : Array[Int]) -> Int {
+  if shape.is_empty() {
+    return 1
+  }
+  let mut count = 1
+  for dim in shape {
+    count = count * dim
+  }
+  count
+}
+
+///|
+fn array_from_items(items : Array[Value]) -> Value raise UiuaMLError {
+  if items.is_empty() {
+    return make_array([0], [])
+  }
+  let child_shape = infer_shape(items[0])
+  let data = Array::new()
+  for item in items {
+    guard infer_shape(item) == child_shape else {
+      fail("Array literal expects rectangular rows")
+    }
+    for leaf in flat_values(item) {
+      data.push(leaf)
+    }
+  }
+  let shape = [
+    if child_shape.is_empty() {
+      data.length()
+    } else {
+      data.length() / element_count_for_shape(child_shape)
+    },
+  ]
+  for dim in child_shape {
+    shape.push(dim)
+  }
+  make_array(shape, data)
+}
+
+///|
+fn UiArray::element_count(self : UiArray) -> Int {
+  self.data.length()
+}
+
+///|
+fn UiArray::rank(self : UiArray) -> Int {
+  self.shape.length()
+}
+
+///|
+fn UiArray::row_count(self : UiArray) -> Int {
+  if self.shape.is_empty() {
+    1
+  } else {
+    self.shape[0]
+  }
+}
+
+///|
+fn UiArray::row_len(self : UiArray) -> Int {
+  suffix_element_count(self.shape, 1)
+}
+
+///|
+fn UiArray::row_shape(self : UiArray) -> Array[Int] {
+  if self.rank() <= 1 {
+    []
+  } else {
+    self.shape[1:].to_owned()
+  }
+}
+
+///|
+fn UiArray::row_value(self : UiArray, row : Int) -> Value {
+  if row < 0 || row >= self.row_count() {
+    panic()
+  }
+  if self.rank() <= 1 {
+    self.data[row]
+  } else {
+    let row_len = self.row_len()
+    let start = row * row_len
+    let data = Array::new(capacity=row_len)
+    let mut i = 0
+    while i < row_len {
+      data.push(self.data[start + i])
+      i = i + 1
+    }
+    make_array(self.row_shape(), data) catch {
+      _ => panic()
+    }
+  }
+}
+
+///|
+fn UiArray::reversed(self : UiArray) -> UiArray {
+  if self.rank() <= 1 {
+    return { shape: self.shape, data: self.data.rev() }
+  }
+  let row_len = self.row_len()
+  let data = Array::new(capacity=self.element_count())
+  let mut row = self.row_count() - 1
+  while row >= 0 {
+    let start = row * row_len
+    let mut i = 0
+    while i < row_len {
+      data.push(self.data[start + i])
+      i = i + 1
+    }
+    if row == 0 {
+      break
+    }
+    row = row - 1
+  }
+  { shape: self.shape, data }
+}
+
+///|
+fn UiArray::append_rows(
+  self : UiArray,
+  other : UiArray,
+) -> UiArray raise UiuaMLError {
+  guard self.row_shape() == other.row_shape() else {
+    fail(
+      "append expects matching row shapes: \{render_shape(self.row_shape())} vs \{render_shape(other.row_shape())}",
+    )
+  }
+  let data = self.data.copy()
+  for item in other.data {
+    data.push(item)
+  }
+  let shape = [self.row_count() + other.row_count()]
+  for dim in self.row_shape() {
+    shape.push(dim)
+  }
+  validate_shape(shape, data.length())
+  { shape, data }
 }
 
 ///|
@@ -911,10 +1102,7 @@ fn Value::render(self : Value) -> String {
   match self {
     Value::Num(n) => render_number(n)
     Value::Bool(b) => if b { "true" } else { "false" }
-    Value::Array(items) => {
-      let body = items.map(item => item.render()).join(" ")
-      "[\{body}]"
-    }
+    Value::Array(array) => render_array(array)
     Value::Closure(_) => "<fun>"
     Value::Builtin(name, _, captured) =>
       if captured.is_empty() {
@@ -923,6 +1111,22 @@ fn Value::render(self : Value) -> String {
         "<builtin:\{name}/partial>"
       }
   }
+}
+
+///|
+fn render_array(array : UiArray) -> String {
+  if array.rank() <= 1 {
+    let body = array.data.map(item => item.render()).join(" ")
+    return "[\{body}]"
+  }
+  let rows = Array::new(capacity=array.row_count())
+  let mut row = 0
+  while row < array.row_count() {
+    rows.push(array.row_value(row).render())
+    row = row + 1
+  }
+  let body = rows.join(" ")
+  "[\{body}]"
 }
 
 ///|
