@@ -467,28 +467,27 @@ priv enum Value {
 
 ///|
 fn default_env() -> Env {
-  let env : Env = @hashmap.new()
-  bind_builtin(env, "range", 1)
-  bind_builtin(env, "iota", 1)
-  bind_builtin(env, "shape", 1)
-  bind_builtin(env, "rank", 1)
-  bind_builtin(env, "sum", 1)
-  bind_builtin(env, "first", 1)
-  bind_builtin(env, "last", 1)
-  bind_builtin(env, "reverse", 1)
-  bind_builtin(env, "deshape", 1)
-  bind_builtin(env, "len", 1)
-  bind_builtin(env, "reshape", 2)
-  bind_builtin(env, "take", 2)
-  bind_builtin(env, "drop", 2)
-  bind_builtin(env, "transpose", 1)
-  bind_builtin(env, "append", 2)
-  env
+  @hashmap.new()
+  |> bind_builtin("range", 1)
+  |> bind_builtin("iota", 1)
+  |> bind_builtin("shape", 1)
+  |> bind_builtin("rank", 1)
+  |> bind_builtin("sum", 1)
+  |> bind_builtin("first", 1)
+  |> bind_builtin("last", 1)
+  |> bind_builtin("reverse", 1)
+  |> bind_builtin("deshape", 1)
+  |> bind_builtin("len", 1)
+  |> bind_builtin("reshape", 2)
+  |> bind_builtin("take", 2)
+  |> bind_builtin("drop", 2)
+  |> bind_builtin("transpose", 1)
+  |> bind_builtin("append", 2)
 }
 
 ///|
-fn bind_builtin(env : Env, name : String, arity : Int) -> Unit {
-  env.set(name, Value::Builtin(name, arity, []))
+fn bind_builtin(env : Env, name : String, arity : Int) -> Env {
+  env.add(name, Value::Builtin(name, arity, []))
 }
 
 ///|
@@ -509,8 +508,7 @@ fn eval(expr : Expr, env : Env) -> Value raise UiuaMLError {
       array_from_items(values)
     }
     Expr::Let(name, value_expr, body) => {
-      let next_env = env.copy()
-      next_env.set(name, eval(value_expr, env))
+      let next_env = env.add(name, eval(value_expr, env))
       eval(body, next_env)
     }
     Expr::If(cond, on_true, on_false) =>
@@ -519,7 +517,7 @@ fn eval(expr : Expr, env : Env) -> Value raise UiuaMLError {
       } else {
         eval(on_false, env)
       }
-    Expr::Fun(param, body) => Value::Closure({ param, body, env: env.copy() })
+    Expr::Fun(param, body) => Value::Closure({ param, body, env })
     Expr::Call(callee, arg) => apply(eval(callee, env), eval(arg, env))
     Expr::Unary(op, inner) => eval_unary(op, eval(inner, env))
     Expr::Binary(op, lhs, rhs) =>
@@ -541,8 +539,7 @@ fn truthy(value : Value) -> Bool {
 fn apply(fn_value : Value, arg : Value) -> Value raise UiuaMLError {
   match fn_value {
     Value::Closure(closure) => {
-      let next_env = closure.env.copy()
-      next_env.set(closure.param, arg)
+      let next_env = closure.env.add(closure.param, arg)
       eval(closure.body, next_env)
     }
     Value::Builtin(name, arity, captured) => {
