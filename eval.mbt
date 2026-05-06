@@ -1,0 +1,428 @@
+///|
+fn default_env() -> Env {
+  @hashmap.new()
+  |> bind_builtin("range", 1)
+  |> bind_builtin("iota", 1)
+  |> bind_builtin("shape", 1)
+  |> bind_builtin("rank", 1)
+  |> bind_builtin("sum", 1)
+  |> bind_builtin("first", 1)
+  |> bind_builtin("last", 1)
+  |> bind_builtin("reverse", 1)
+  |> bind_builtin("deshape", 1)
+  |> bind_builtin("len", 1)
+  |> bind_builtin("reshape", 2)
+  |> bind_builtin("take", 2)
+  |> bind_builtin("drop", 2)
+  |> bind_builtin("transpose", 1)
+  |> bind_builtin("append", 2)
+}
+
+///|
+fn bind_builtin(env : Env, name : String, arity : Int) -> Env {
+  env.add(name, Value::Builtin(name, arity, []))
+}
+
+///|
+fn eval(expr : Expr, env : Env) -> Value raise UiuaMLError {
+  match expr {
+    Expr::Number(n) => Value::Num(n)
+    Expr::Bool(b) => Value::Bool(b)
+    Expr::Var(name) =>
+      match env.get(name) {
+        Some(value) => value
+        None => fail("Unbound name: \{name}")
+      }
+    Expr::ArrayLit(items) => {
+      let values = Array::new(capacity=items.length())
+      for item in items {
+        values.push(eval(item, env))
+      }
+      array_from_items(values)
+    }
+    Expr::Let(name, value_expr, body) => {
+      let next_env = env.add(name, eval(value_expr, env))
+      eval(body, next_env)
+    }
+    Expr::If(cond, on_true, on_false) =>
+      if truthy(eval(cond, env)) {
+        eval(on_true, env)
+      } else {
+        eval(on_false, env)
+      }
+    Expr::Fun(param, body) => Value::Closure({ param, body, env })
+    Expr::Call(callee, arg) => apply(eval(callee, env), eval(arg, env))
+    Expr::Unary(op, inner) => eval_unary(op, eval(inner, env))
+    Expr::Binary(op, lhs, rhs) =>
+      eval_binary(op, eval(lhs, env), eval(rhs, env))
+  }
+}
+
+///|
+fn truthy(value : Value) -> Bool {
+  match value {
+    Value::Bool(b) => b
+    Value::Num(n) => n != 0.0
+    Value::Array(array) => array.element_count() != 0
+    Value::Closure(_) | Value::Builtin(_, _, _) => true
+  }
+}
+
+///|
+fn apply(fn_value : Value, arg : Value) -> Value raise UiuaMLError {
+  match fn_value {
+    Value::Closure(closure) => {
+      let next_env = closure.env.add(closure.param, arg)
+      eval(closure.body, next_env)
+    }
+    Value::Builtin(name, arity, captured) => {
+      let args = captured.copy()
+      args.push(arg)
+      if args.length() == arity {
+        run_builtin(name, args)
+      } else {
+        Value::Builtin(name, arity, args)
+      }
+    }
+    _ => fail("Attempted to call a non-function value")
+  }
+}
+
+///|
+fn eval_unary(op : String, value : Value) -> Value raise UiuaMLError {
+  match op {
+    "-" => broadcast_unary(value, n => Value::Num(-n))
+    _ => fail("Unknown unary operator: \{op}")
+  }
+}
+
+///|
+fn eval_binary(
+  op : String,
+  lhs : Value,
+  rhs : Value,
+) -> Value raise UiuaMLError {
+  match op {
+    "+" => broadcast_numeric(lhs, rhs, (a, b) => a + b)
+    "-" => broadcast_numeric(lhs, rhs, (a, b) => a - b)
+    "*" => broadcast_numeric(lhs, rhs, (a, b) => a * b)
+    "/" => broadcast_numeric(lhs, rhs, (a, b) => a / b)
+    "==" => broadcast_compare(lhs, rhs, (a, b) => a == b, deep_equal)
+    "!=" =>
+      negate_bools(broadcast_compare(lhs, rhs, (a, b) => a == b, deep_equal))
+    "<" => broadcast_compare(lhs, rhs, (a, b) => a < b, ordering_compare_error)
+    "<=" =>
+      broadcast_compare(lhs, rhs, (a, b) => a <= b, ordering_compare_error)
+    ">" => broadcast_compare(lhs, rhs, (a, b) => a > b, ordering_compare_error)
+    ">=" =>
+      broadcast_compare(lhs, rhs, (a, b) => a >= b, ordering_compare_error)
+    _ => fail("Unknown binary operator: \{op}")
+  }
+}
+
+///|
+fn ordering_compare_error(_lhs : Value, _rhs : Value) -> Bool raise UiuaMLError {
+  fail("Ordering comparisons expect numbers or arrays of numbers")
+}
+
+///|
+fn negate_bools(value : Value) -> Value raise UiuaMLError {
+  match value {
+    Value::Bool(b) => Value::Bool(!b)
+    Value::Array(array) => {
+      let result = Array::new(capacity=array.element_count())
+      for item in array.data {
+        result.push(negate_bools(item))
+      }
+      Value::Array(UiArray::{ shape: array.shape, data: result })
+    }
+    _ => fail("Expected boolean result")
+  }
+}
+
+///|
+fn broadcast_unary(
+  value : Value,
+  f : (Double) -> Value,
+) -> Value raise UiuaMLError {
+  match value {
+    Value::Num(n) => f(n)
+    Value::Array(array) => {
+      let result = Array::new(capacity=array.element_count())
+      for item in array.data {
+        result.push(broadcast_unary(item, f))
+      }
+      Value::Array(UiArray::{ shape: array.shape, data: result })
+    }
+    _ => fail("Numeric operation expects numbers or arrays of numbers")
+  }
+}
+
+///|
+fn broadcast_numeric(
+  lhs : Value,
+  rhs : Value,
+  f : (Double, Double) -> Double,
+) -> Value raise UiuaMLError {
+  pervade(lhs, rhs, (left, right) => {
+    guard left is Value::Num(a) && right is Value::Num(b) else {
+      fail("Numeric operation expects numbers or arrays of numbers")
+    }
+    Value::Num(f(a, b))
+  })
+}
+
+///|
+fn broadcast_compare(
+  lhs : Value,
+  rhs : Value,
+  number_cmp : (Double, Double) -> Bool,
+  scalar_cmp : (Value, Value) -> Bool raise UiuaMLError,
+) -> Value raise UiuaMLError {
+  pervade(lhs, rhs, (left, right) => {
+    match (left, right) {
+      (Value::Num(a), Value::Num(b)) => Value::Bool(number_cmp(a, b))
+      _ => Value::Bool(scalar_cmp(left, right))
+    }
+  })
+}
+
+///|
+fn pervade(
+  lhs : Value,
+  rhs : Value,
+  op_scalar : (Value, Value) -> Value raise UiuaMLError,
+) -> Value raise UiuaMLError {
+  match (lhs, rhs) {
+    (Value::Array(left), Value::Array(right)) =>
+      pervade_arrays(left, right, op_scalar)
+    (Value::Array(array), scalar) => map_array_left(array, scalar, op_scalar)
+    (scalar, Value::Array(array)) => map_array_right(scalar, array, op_scalar)
+    _ => op_scalar(lhs, rhs)
+  }
+}
+
+///|
+fn map_array_left(
+  array : UiArray,
+  scalar : Value,
+  op_scalar : (Value, Value) -> Value raise UiuaMLError,
+) -> Value raise UiuaMLError {
+  let data = Array::new(capacity=array.element_count())
+  for item in array.data {
+    data.push(op_scalar(item, scalar))
+  }
+  Value::Array(UiArray::{ shape: array.shape, data })
+}
+
+///|
+fn map_array_right(
+  scalar : Value,
+  array : UiArray,
+  op_scalar : (Value, Value) -> Value raise UiuaMLError,
+) -> Value raise UiuaMLError {
+  let data = Array::new(capacity=array.element_count())
+  for item in array.data {
+    data.push(op_scalar(scalar, item))
+  }
+  Value::Array(UiArray::{ shape: array.shape, data })
+}
+
+///|
+fn pervade_arrays(
+  lhs : UiArray,
+  rhs : UiArray,
+  op_scalar : (Value, Value) -> Value raise UiuaMLError,
+) -> Value raise UiuaMLError {
+  if lhs.shape == rhs.shape {
+    let data = Array::new(capacity=lhs.element_count())
+    let mut i = 0
+    while i < lhs.element_count() {
+      data.push(op_scalar(lhs.data[i], rhs.data[i]))
+      i = i + 1
+    }
+    return Value::Array(UiArray::{ shape: lhs.shape, data })
+  }
+  if shape_is_prefix(lhs.shape, rhs.shape) {
+    let chunk = suffix_element_count(rhs.shape, lhs.rank())
+    let data = Array::new(capacity=rhs.element_count())
+    let mut i = 0
+    while i < lhs.element_count() {
+      let mut j = 0
+      while j < chunk {
+        data.push(op_scalar(lhs.data[i], rhs.data[i * chunk + j]))
+        j = j + 1
+      }
+      i = i + 1
+    }
+    return Value::Array(UiArray::{ shape: rhs.shape, data })
+  }
+  if shape_is_prefix(rhs.shape, lhs.shape) {
+    let chunk = suffix_element_count(lhs.shape, rhs.rank())
+    let data = Array::new(capacity=lhs.element_count())
+    let mut i = 0
+    while i < rhs.element_count() {
+      let mut j = 0
+      while j < chunk {
+        data.push(op_scalar(lhs.data[i * chunk + j], rhs.data[i]))
+        j = j + 1
+      }
+      i = i + 1
+    }
+    return Value::Array(UiArray::{ shape: lhs.shape, data })
+  }
+  fail(
+    "Shape mismatch: \{render_shape(lhs.shape)} vs \{render_shape(rhs.shape)}",
+  )
+}
+
+///|
+fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
+  match name {
+    "range" | "iota" => builtin_range(args[0])
+    "shape" => builtin_shape(args[0])
+    "rank" => builtin_rank(args[0])
+    "sum" => Value::Num(sum_numbers(args[0]))
+    "first" => builtin_first(args[0])
+    "last" => builtin_last(args[0])
+    "reverse" => builtin_reverse(args[0])
+    "deshape" => builtin_deshape(args[0])
+    "len" => builtin_len(args[0])
+    "reshape" => builtin_reshape(args[0], args[1])
+    "take" => builtin_take(args[0], args[1])
+    "drop" => builtin_drop(args[0], args[1])
+    "transpose" => builtin_transpose(args[0])
+    "append" => builtin_append(args[0], args[1])
+    _ => fail("Unknown builtin: \{name}")
+  }
+}
+
+///|
+fn builtin_range(arg : Value) -> Value raise UiuaMLError {
+  let n = as_nat(arg)
+  let items = Array::new(capacity=n)
+  let mut i = 0
+  while i < n {
+    items.push(Value::Num(Double::from_int(i)))
+    i = i + 1
+  }
+  make_array([n], items)
+}
+
+///|
+fn builtin_shape(arg : Value) -> Value raise UiuaMLError {
+  let dims = infer_shape(arg)
+  let data = Array::new(capacity=dims.length())
+  for dim in dims {
+    data.push(Value::Num(Double::from_int(dim)))
+  }
+  make_array([data.length()], data)
+}
+
+///|
+fn builtin_rank(arg : Value) -> Value {
+  Value::Num(Double::from_int(infer_shape(arg).length()))
+}
+
+///|
+fn builtin_first(arg : Value) -> Value raise UiuaMLError {
+  match arg {
+    Value::Array(array) =>
+      if array.row_count() == 0 {
+        fail("first expects a non-empty array")
+      } else {
+        array.row_value(0)
+      }
+    _ => fail("first expects an array")
+  }
+}
+
+///|
+fn builtin_last(arg : Value) -> Value raise UiuaMLError {
+  match arg {
+    Value::Array(array) =>
+      if array.row_count() == 0 {
+        fail("last expects a non-empty array")
+      } else {
+        array.row_value(array.row_count() - 1)
+      }
+    _ => fail("last expects an array")
+  }
+}
+
+///|
+fn builtin_reverse(arg : Value) -> Value raise UiuaMLError {
+  match arg {
+    Value::Array(array) => Value::Array(array.reversed())
+    _ => fail("reverse expects an array")
+  }
+}
+
+///|
+fn builtin_deshape(arg : Value) -> Value raise UiuaMLError {
+  let flat = flat_values(arg)
+  make_array([flat.length()], flat)
+}
+
+///|
+fn builtin_len(arg : Value) -> Value {
+  match arg {
+    Value::Array(array) => Value::Num(Double::from_int(array.row_count()))
+    _ => Value::Num(1.0)
+  }
+}
+
+///|
+fn builtin_append(lhs : Value, rhs : Value) -> Value raise UiuaMLError {
+  match (lhs, rhs) {
+    (Value::Array(xs), Value::Array(ys)) => Value::Array(xs.append_rows(ys))
+    _ => fail("append expects two arrays")
+  }
+}
+
+///|
+fn builtin_reshape(
+  shape_value : Value,
+  data_value : Value,
+) -> Value raise UiuaMLError {
+  let shape = shape_to_dims(shape_value)
+  let flat = flat_values(data_value)
+  guard !flat.is_empty() else { fail("reshape cannot use empty data") }
+  let count = element_count_for_shape(shape)
+  if shape.is_empty() {
+    return flat[0]
+  }
+  let data = Array::new(capacity=count)
+  let mut i = 0
+  while i < count {
+    data.push(flat[i % flat.length()])
+    i = i + 1
+  }
+  make_array(shape, data)
+}
+
+///|
+fn builtin_take(amount : Value, arg : Value) -> Value raise UiuaMLError {
+  let n = as_int(amount)
+  match arg {
+    Value::Array(array) => Value::Array(array.take_rows(n))
+    _ => fail("take expects an array")
+  }
+}
+
+///|
+fn builtin_drop(amount : Value, arg : Value) -> Value raise UiuaMLError {
+  let n = as_int(amount)
+  match arg {
+    Value::Array(array) => Value::Array(array.drop_rows(n))
+    _ => fail("drop expects an array")
+  }
+}
+
+///|
+fn builtin_transpose(arg : Value) -> Value raise UiuaMLError {
+  match arg {
+    Value::Array(array) => Value::Array(array.transposed())
+    _ => fail("transpose expects an array")
+  }
+}
