@@ -22,10 +22,21 @@ test "arrays inspired by uiua" {
   assert_eq(try? interpret("range 5"), Ok("[0 1 2 3 4]"))
   assert_eq(try? interpret("sum [1, 2, 3, 4]"), Ok("10"))
   assert_eq(try? interpret("shape [[1, 2], [3, 4]]"), Ok("[2 2]"))
+  assert_eq(try? interpret("rank [[1, 2], [3, 4]]"), Ok("2"))
   assert_eq(try? interpret("first [[1, 2], [3, 4]]"), Ok("[1 2]"))
+  assert_eq(try? interpret("last [[1, 2], [3, 4]]"), Ok("[3 4]"))
   assert_eq(
     try? interpret("reverse [[1, 2], [3, 4], [5, 6]]"),
     Ok("[[5 6] [3 4] [1 2]]"),
+  )
+  assert_eq(try? interpret("deshape [[1, 2], [3, 4]]"), Ok("[1 2 3 4]"))
+  assert_eq(try? interpret("take 3 [1, 2, 3, 4, 5]"), Ok("[1 2 3]"))
+  assert_eq(try? interpret("take -2 [1, 2, 3, 4, 5]"), Ok("[4 5]"))
+  assert_eq(try? interpret("drop 3 [1, 2, 3, 4, 5]"), Ok("[4 5]"))
+  assert_eq(try? interpret("drop -2 [1, 2, 3, 4, 5]"), Ok("[1 2 3]"))
+  assert_eq(
+    try? interpret("transpose [[1, 2, 3], [4, 5, 6]]"),
+    Ok("[[1 4] [2 5] [3 6]]"),
   )
   assert_eq(
     try? interpret("append [[1, 2]] [[3, 4], [5, 6]]"),

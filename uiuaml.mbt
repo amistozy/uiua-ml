@@ -374,7 +374,16 @@ fn Parser::parse_application(self : Parser) -> Expr raise UiuaMLError {
 ///|
 fn starts_expr(kind : TokenKind) -> Bool {
   match kind {
-    Number | Ident | True | False | LParen | LBracket | If | Fun | Let => true
+    Number
+    | Ident
+    | True
+    | False
+    | LParen
+    | LBracket
+    | If
+    | Fun
+    | Let
+    | Minus => true
     _ => false
   }
 }
@@ -392,7 +401,7 @@ fn Parser::parse_unary(self : Parser) -> Expr raise UiuaMLError {
 fn Parser::parse_primary(self : Parser) -> Expr raise UiuaMLError {
   match self.current().kind {
     TokenKind::Number => {
-      let value = @string.parse_double(self.advance().lexeme[:]) catch {
+      let value = @string.parse_double(self.advance().lexeme) catch {
         _ => fail("Invalid number literal")
       }
       Expr::Number(value)
@@ -462,11 +471,17 @@ fn default_env() -> Env {
   bind_builtin(env, "range", 1)
   bind_builtin(env, "iota", 1)
   bind_builtin(env, "shape", 1)
+  bind_builtin(env, "rank", 1)
   bind_builtin(env, "sum", 1)
   bind_builtin(env, "first", 1)
+  bind_builtin(env, "last", 1)
   bind_builtin(env, "reverse", 1)
+  bind_builtin(env, "deshape", 1)
   bind_builtin(env, "len", 1)
   bind_builtin(env, "reshape", 2)
+  bind_builtin(env, "take", 2)
+  bind_builtin(env, "drop", 2)
+  bind_builtin(env, "transpose", 1)
   bind_builtin(env, "append", 2)
   env
 }
@@ -786,11 +801,17 @@ fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
   match name {
     "range" | "iota" => builtin_range(args[0])
     "shape" => builtin_shape(args[0])
+    "rank" => builtin_rank(args[0])
     "sum" => Value::Num(sum_numbers(args[0]))
     "first" => builtin_first(args[0])
+    "last" => builtin_last(args[0])
     "reverse" => builtin_reverse(args[0])
+    "deshape" => builtin_deshape(args[0])
     "len" => builtin_len(args[0])
     "reshape" => builtin_reshape(args[0], args[1])
+    "take" => builtin_take(args[0], args[1])
+    "drop" => builtin_drop(args[0], args[1])
+    "transpose" => builtin_transpose(args[0])
     "append" => builtin_append(args[0], args[1])
     _ => fail("Unknown builtin: \{name}")
   }
@@ -819,6 +840,11 @@ fn builtin_shape(arg : Value) -> Value raise UiuaMLError {
 }
 
 ///|
+fn builtin_rank(arg : Value) -> Value {
+  Value::Num(Double::from_int(infer_shape(arg).length()))
+}
+
+///|
 fn builtin_first(arg : Value) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) =>
@@ -832,11 +858,30 @@ fn builtin_first(arg : Value) -> Value raise UiuaMLError {
 }
 
 ///|
+fn builtin_last(arg : Value) -> Value raise UiuaMLError {
+  match arg {
+    Value::Array(array) =>
+      if array.row_count() == 0 {
+        fail("last expects a non-empty array")
+      } else {
+        array.row_value(array.row_count() - 1)
+      }
+    _ => fail("last expects an array")
+  }
+}
+
+///|
 fn builtin_reverse(arg : Value) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => Value::Array(array.reversed())
     _ => fail("reverse expects an array")
   }
+}
+
+///|
+fn builtin_deshape(arg : Value) -> Value raise UiuaMLError {
+  let flat = flat_values(arg)
+  make_array([flat.length()], flat)
 }
 
 ///|
@@ -874,6 +919,32 @@ fn builtin_reshape(
     i = i + 1
   }
   make_array(shape, data)
+}
+
+///|
+fn builtin_take(amount : Value, arg : Value) -> Value raise UiuaMLError {
+  let n = as_int(amount)
+  match arg {
+    Value::Array(array) => Value::Array(array.take_rows(n))
+    _ => fail("take expects an array")
+  }
+}
+
+///|
+fn builtin_drop(amount : Value, arg : Value) -> Value raise UiuaMLError {
+  let n = as_int(amount)
+  match arg {
+    Value::Array(array) => Value::Array(array.drop_rows(n))
+    _ => fail("drop expects an array")
+  }
+}
+
+///|
+fn builtin_transpose(arg : Value) -> Value raise UiuaMLError {
+  match arg {
+    Value::Array(array) => Value::Array(array.transposed())
+    _ => fail("transpose expects an array")
+  }
 }
 
 ///|
@@ -1074,6 +1145,122 @@ fn UiArray::append_rows(
   }
   validate_shape(shape, data.length())
   { shape, data }
+}
+
+///|
+fn UiArray::take_rows(self : UiArray, n : Int) -> UiArray {
+  if self.rank() == 0 {
+    return if n == 0 { { shape: [0], data: [] } } else { self }
+  }
+  let rows = self.row_count()
+  let count = if n >= 0 { n.min(rows) } else { (-n).min(rows) }
+  if n >= 0 {
+    self.slice_rows(0, count)
+  } else {
+    self.slice_rows(rows - count, rows)
+  }
+}
+
+///|
+fn UiArray::drop_rows(self : UiArray, n : Int) -> UiArray {
+  if self.rank() == 0 {
+    return if n == 0 { self } else { { shape: [0], data: [] } }
+  }
+  let rows = self.row_count()
+  let count = if n >= 0 { n.min(rows) } else { (-n).min(rows) }
+  if n >= 0 {
+    self.slice_rows(count, rows)
+  } else {
+    self.slice_rows(0, rows - count)
+  }
+}
+
+///|
+fn UiArray::slice_rows(
+  self : UiArray,
+  start_row : Int,
+  end_row : Int,
+) -> UiArray {
+  let row_len = self.row_len()
+  let start = start_row * row_len
+  let end = end_row * row_len
+  let data = Array::new(capacity=end - start)
+  let mut i = start
+  while i < end {
+    data.push(self.data[i])
+    i = i + 1
+  }
+  let shape = if self.rank() == 0 {
+    if start_row == 0 && end_row == 1 {
+      []
+    } else {
+      [0]
+    }
+  } else {
+    let next = self.shape.copy()
+    next[0] = end_row - start_row
+    next
+  }
+  { shape, data }
+}
+
+///|
+fn UiArray::transposed(self : UiArray) -> UiArray {
+  if self.rank() <= 1 {
+    return self
+  }
+  let shape = self.shape[1:].to_owned()
+  shape.push(self.shape[0])
+  let count = self.element_count()
+  let data = Array::new(capacity=count)
+  let mut flat = 0
+  while flat < count {
+    let indices = flat_to_indices(shape, flat)
+    let old_indices = indices[shape.length() - 1:].to_owned()
+    let mut i = 0
+    while i < shape.length() - 1 {
+      old_indices.push(indices[i])
+      i = i + 1
+    }
+    data.push(self.data[indices_to_flat(self.shape, old_indices)])
+    flat = flat + 1
+  }
+  { shape, data }
+}
+
+///|
+fn flat_to_indices(shape : Array[Int], flat : Int) -> Array[Int] {
+  if shape.is_empty() {
+    return []
+  }
+  let indices = Array::new(capacity=shape.length())
+  let mut rest = flat
+  let mut i = shape.length() - 1
+  while i >= 0 {
+    indices.push(rest % shape[i])
+    rest = rest / shape[i]
+    if i == 0 {
+      break
+    }
+    i = i - 1
+  }
+  indices.rev()
+}
+
+///|
+fn indices_to_flat(shape : Array[Int], indices : Array[Int]) -> Int {
+  let mut flat = 0
+  let mut stride = 1
+  let mut i = shape.length() - 1
+  while i >= 0 {
+    flat = flat + indices[i] * stride
+    stride = stride * shape[i]
+    if i == 0 {
+      break
+    }
+    i = i - 1
+  }
+  flat
 }
 
 ///|

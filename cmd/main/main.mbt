@@ -72,7 +72,7 @@ fn main {
 
 ///|
 fn interpret_and_print(source : String) -> Unit {
-  (@uiuaml.interpret(source[:]) |> println) catch {
+  (@uiuaml.interpret(source) |> println) catch {
     @uiuaml.UiuaMLError(message) => println("UiuaML error: \{message}")
   }
 }
