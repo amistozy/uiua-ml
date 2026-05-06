@@ -1,6 +1,10 @@
-// import {
-//   "amistozy/uiuaml" @lib,
-// }
+import {
+  "amistozy/uiuaml",
+  "moonbitlang/core/argparse",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/env",
+  "moonbitlang/x/fs",
+}
 
 options(
   "is-main": true,

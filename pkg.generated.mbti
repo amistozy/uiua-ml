@@ -1,0 +1,22 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "amistozy/uiuaml"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn interpret(StringView) -> String raise UiuaMLError
+
+// Errors
+pub suberror UiuaMLError {
+  UiuaMLError(String)
+} derive(Eq, @debug.Debug)
+pub impl Show for UiuaMLError
+
+// Types and methods
+
+// Type aliases
+
+// Traits
+
