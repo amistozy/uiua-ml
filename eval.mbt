@@ -6,6 +6,7 @@ fn default_env() -> Env {
   |> bind_builtin("map", 2)
   |> bind_builtin("each", 2)
   |> bind_builtin("reduce", 3)
+  |> bind_builtin("scan", 3)
   |> bind_builtin("shape", 1)
   |> bind_builtin("rank", 1)
   |> bind_builtin("sum", 1)
@@ -292,6 +293,7 @@ fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
     "range" | "iota" => builtin_range(args[0])
     "map" | "each" => builtin_map(args[0], args[1])
     "reduce" => builtin_reduce(args[0], args[1], args[2])
+    "scan" => builtin_scan(args[0], args[1], args[2])
     "shape" => builtin_shape(args[0])
     "rank" => builtin_rank(args[0])
     "sum" => Value::Num(sum_numbers(args[0]))
@@ -375,8 +377,42 @@ fn builtin_reduce(
 }
 
 ///|
+fn builtin_scan(
+  fn_value : Value,
+  init : Value,
+  arg : Value,
+) -> Value raise UiuaMLError {
+  match arg {
+    Value::Array(array) => {
+      if array.row_count() == 0 {
+        return empty_rows_like(init)
+      }
+      let scanned = Array::new(capacity=array.row_count())
+      let mut acc = init
+      let mut row = 0
+      while row < array.row_count() {
+        acc = apply(apply(fn_value, acc), array.row_value(row))
+        scanned.push(acc)
+        row = row + 1
+      }
+      array_from_items(scanned)
+    }
+    _ => apply(apply(fn_value, init), arg)
+  }
+}
+
+///|
 fn builtin_rank(arg : Value) -> Value {
   Value::Num(Double::from_int(infer_shape(arg).length()))
+}
+
+///|
+fn empty_rows_like(value : Value) -> Value raise UiuaMLError {
+  let shape = [0]
+  for dim in infer_shape(value) {
+    shape.push(dim)
+  }
+  make_array(shape, [])
 }
 
 ///|

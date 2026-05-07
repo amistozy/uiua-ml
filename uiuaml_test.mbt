@@ -30,11 +30,22 @@ test "arrays inspired by uiua" {
     Ok("10"),
   )
   assert_eq(
+    try? interpret("scan (fun acc -> fun x -> acc + x) 0 [1, 2, 3, 4]"),
+    Ok("[1 3 6 10]"),
+  )
+  assert_eq(
     try? interpret(
       "reduce (fun acc -> fun row -> acc + sum row) 0 [[1, 2], [3, 4], [5, 6]]",
     ),
     Ok("21"),
   )
+  assert_eq(
+    try? interpret(
+      "scan (fun acc -> fun row -> acc + row) [0, 0] [[1, 2], [3, 4], [5, 6]]",
+    ),
+    Ok("[[1 2] [4 6] [9 12]]"),
+  )
+  assert_eq(try? interpret("scan (fun acc -> fun x -> acc + x) 0 []"), Ok("[]"))
   assert_eq(try? interpret("sum [1, 2, 3, 4]"), Ok("10"))
   assert_eq(try? interpret("where [0, 1, 0, 1, 1, 0, 0]"), Ok("[1 3 4]"))
   assert_eq(try? interpret("shape [[1, 2], [3, 4]]"), Ok("[2 2]"))
