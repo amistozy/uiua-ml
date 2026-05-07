@@ -27,6 +27,7 @@ UiuaML currently supports:
 - A flat `shape + data` array runtime instead of nested list interpretation
 - Pervasive arithmetic and comparisons with scalar and shape-prefix broadcasting
 - A small but useful set of Uiua-inspired array primitives
+- Higher-order array combinators for row-wise mapping and reduction
 - A CLI with `eval` and `run` subcommands built with `argparse`
 
 ## Examples
@@ -45,6 +46,8 @@ if sum [1, 1, 1] == 3 then 42 else 0
 [1, 2, 3] + 10
 [1, 2, 3] + [10, 20, 30]
 [10, 20] + [[3, 4, 5], [6, 7, 8]]
+map (fun row -> sum row) [[1, 2], [3, 4], [5, 6]]
+reduce (fun acc -> fun x -> acc + x) 0 [1, 2, 3, 4]
 ```
 
 ### Array-oriented built-ins
@@ -94,6 +97,9 @@ UiuaML currently provides the following built-ins.
 
 - `sum`
 - `keep`
+- `map`
+- `each`
+- `reduce`
 
 ## Array Model
 

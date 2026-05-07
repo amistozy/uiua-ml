@@ -3,6 +3,9 @@ fn default_env() -> Env {
   @hashmap.new()
   |> bind_builtin("range", 1)
   |> bind_builtin("iota", 1)
+  |> bind_builtin("map", 2)
+  |> bind_builtin("each", 2)
+  |> bind_builtin("reduce", 3)
   |> bind_builtin("shape", 1)
   |> bind_builtin("rank", 1)
   |> bind_builtin("sum", 1)
@@ -287,6 +290,8 @@ fn pervade_arrays(
 fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
   match name {
     "range" | "iota" => builtin_range(args[0])
+    "map" | "each" => builtin_map(args[0], args[1])
+    "reduce" => builtin_reduce(args[0], args[1], args[2])
     "shape" => builtin_shape(args[0])
     "rank" => builtin_rank(args[0])
     "sum" => Value::Num(sum_numbers(args[0]))
@@ -331,6 +336,42 @@ fn builtin_shape(arg : Value) -> Value raise UiuaMLError {
     data.push(Value::Num(Double::from_int(dim)))
   }
   make_array([data.length()], data)
+}
+
+///|
+fn builtin_map(fn_value : Value, arg : Value) -> Value raise UiuaMLError {
+  match arg {
+    Value::Array(array) => {
+      let mapped = Array::new(capacity=array.row_count())
+      let mut row = 0
+      while row < array.row_count() {
+        mapped.push(apply(fn_value, array.row_value(row)))
+        row = row + 1
+      }
+      array_from_items(mapped)
+    }
+    _ => apply(fn_value, arg)
+  }
+}
+
+///|
+fn builtin_reduce(
+  fn_value : Value,
+  init : Value,
+  arg : Value,
+) -> Value raise UiuaMLError {
+  match arg {
+    Value::Array(array) => {
+      let mut acc = init
+      let mut row = 0
+      while row < array.row_count() {
+        acc = apply(apply(fn_value, acc), array.row_value(row))
+        row = row + 1
+      }
+      acc
+    }
+    _ => apply(apply(fn_value, init), arg)
+  }
 }
 
 ///|
