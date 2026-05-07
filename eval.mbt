@@ -12,6 +12,9 @@ fn default_env() -> Env {
   |> bind_builtin("shape", 1)
   |> bind_builtin("rank", 1)
   |> bind_builtin("sum", 1)
+  |> bind_builtin("any", 1)
+  |> bind_builtin("all", 1)
+  |> bind_builtin("count", 1)
   |> bind_builtin("where", 1)
   |> bind_builtin("first", 1)
   |> bind_builtin("last", 1)
@@ -301,6 +304,9 @@ fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
     "shape" => builtin_shape(args[0])
     "rank" => builtin_rank(args[0])
     "sum" => Value::Num(sum_numbers(args[0]))
+    "any" => builtin_any(args[0])
+    "all" => builtin_all(args[0])
+    "count" => builtin_count(args[0])
     "where" => builtin_where(args[0])
     "first" => builtin_first(args[0])
     "last" => builtin_last(args[0])
@@ -498,6 +504,21 @@ fn builtin_scan(
 ///|
 fn builtin_rank(arg : Value) -> Value {
   Value::Num(Double::from_int(infer_shape(arg).length()))
+}
+
+///|
+fn builtin_any(arg : Value) -> Value {
+  Value::Bool(any_truthy(arg))
+}
+
+///|
+fn builtin_all(arg : Value) -> Value {
+  Value::Bool(all_truthy(arg))
+}
+
+///|
+fn builtin_count(arg : Value) -> Value {
+  Value::Num(Double::from_int(count_truthy(arg)))
 }
 
 ///|

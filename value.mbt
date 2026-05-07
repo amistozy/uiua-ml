@@ -118,6 +118,50 @@ fn sum_numbers(value : Value) -> Double raise UiuaMLError {
 }
 
 ///|
+fn any_truthy(value : Value) -> Bool {
+  match value {
+    Value::Array(array) => {
+      for item in array.data {
+        if any_truthy(item) {
+          return true
+        }
+      }
+      false
+    }
+    _ => truthy(value)
+  }
+}
+
+///|
+fn all_truthy(value : Value) -> Bool {
+  match value {
+    Value::Array(array) => {
+      for item in array.data {
+        if !all_truthy(item) {
+          return false
+        }
+      }
+      true
+    }
+    _ => truthy(value)
+  }
+}
+
+///|
+fn count_truthy(value : Value) -> Int {
+  match value {
+    Value::Array(array) => {
+      let mut count = 0
+      for item in array.data {
+        count = count + count_truthy(item)
+      }
+      count
+    }
+    _ => if truthy(value) { 1 } else { 0 }
+  }
+}
+
+///|
 fn make_array(
   shape : Array[Int],
   data : Array[Value],
