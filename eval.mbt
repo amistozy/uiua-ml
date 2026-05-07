@@ -352,14 +352,43 @@ fn run_builtin(
 
 ///|
 fn builtin_range(arg : Value) -> Value raise UiuaMLError {
-  let n = as_nat(arg)
-  let items = Array::new(capacity=n)
-  let mut i = 0
-  while i < n {
-    items.push(Value::Num(Double::from_int(i)))
-    i = i + 1
+  let dims = range_shape_dims(arg)
+  guard !dims.is_empty() else { return make_array([0], []) }
+  if dims.length() == 1 {
+    let n = dims[0]
+    let count = n.abs()
+    let items = Array::new(capacity=count)
+    let mut i = 0
+    while i < count {
+      let value = if n >= 0 { i } else { -1 - i }
+      items.push(Value::Num(Double::from_int(value)))
+      i = i + 1
+    }
+    return make_array([count], items)
   }
-  make_array([n], items)
+  let shape = Array::new(capacity=dims.length() + 1)
+  for dim in dims {
+    shape.push(dim.abs())
+  }
+  shape.push(dims.length())
+  let count = element_count_for_shape(shape[0:shape.length() - 1])
+  let data = Array::new(capacity=count * dims.length())
+  let mut flat = 0
+  while flat < count {
+    let indices = flat_to_indices(shape[0:shape.length() - 1], flat)
+    let mut axis = 0
+    while axis < dims.length() {
+      let coord = if dims[axis] >= 0 {
+        indices[axis]
+      } else {
+        -1 - indices[axis]
+      }
+      data.push(Value::Num(Double::from_int(coord)))
+      axis = axis + 1
+    }
+    flat = flat + 1
+  }
+  make_array(shape, data)
 }
 
 ///|

@@ -20,6 +20,19 @@ test "functions and lets" {
 ///|
 test "arrays inspired by uiua" {
   assert_eq(try? interpret("range 5"), Ok("[0 1 2 3 4]"))
+  assert_eq(try? interpret("range -5"), Ok("[-1 -2 -3 -4 -5]"))
+  assert_eq(
+    try? interpret("range [3, 3]"),
+    Ok("[[[0 0] [0 1] [0 2]] [[1 0] [1 1] [1 2]] [[2 0] [2 1] [2 2]]]"),
+  )
+  assert_eq(
+    try? interpret("range [2, 3]"),
+    Ok("[[[0 0] [0 1] [0 2]] [[1 0] [1 1] [1 2]]]"),
+  )
+  assert_eq(
+    try? interpret("range [-2, 3]"),
+    Ok("[[[-1 0] [-1 1] [-1 2]] [[-2 0] [-2 1] [-2 2]]]"),
+  )
   assert_eq(try? interpret("map (fun x -> x + 1) [1, 2, 3]"), Ok("[2 3 4]"))
   assert_eq(
     try? interpret("each (fun row -> sum row) [[1, 2], [3, 4], [5, 6]]"),

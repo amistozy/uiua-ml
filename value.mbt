@@ -108,6 +108,24 @@ fn shape_to_dims(value : Value) -> Array[Int] raise UiuaMLError {
 }
 
 ///|
+fn range_shape_dims(value : Value) -> Array[Int] raise UiuaMLError {
+  match value {
+    Value::Num(_) => [as_int(value)]
+    Value::Array(array) => {
+      guard array.rank() <= 1 else {
+        fail("range expects an integer or a vector of integers")
+      }
+      let dims = Array::new(capacity=array.element_count())
+      for item in array.data {
+        dims.push(as_int(item))
+      }
+      dims
+    }
+    _ => fail("range expects an integer or a vector of integers")
+  }
+}
+
+///|
 fn infer_shape(value : Value) -> Array[Int] {
   match value {
     Value::Array(array) => array.shape
