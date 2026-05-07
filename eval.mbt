@@ -5,6 +5,7 @@ fn default_env() -> Env {
   |> bind_builtin("iota", 1)
   |> bind_builtin("map", 2)
   |> bind_builtin("each", 2)
+  |> bind_builtin("zip", 3)
   |> bind_builtin("reduce", 3)
   |> bind_builtin("scan", 3)
   |> bind_builtin("shape", 1)
@@ -292,6 +293,7 @@ fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
   match name {
     "range" | "iota" => builtin_range(args[0])
     "map" | "each" => builtin_map(args[0], args[1])
+    "zip" => builtin_zip(args[0], args[1], args[2])
     "reduce" => builtin_reduce(args[0], args[1], args[2])
     "scan" => builtin_scan(args[0], args[1], args[2])
     "shape" => builtin_shape(args[0])
@@ -353,6 +355,78 @@ fn builtin_map(fn_value : Value, arg : Value) -> Value raise UiuaMLError {
       array_from_items(mapped)
     }
     _ => apply(fn_value, arg)
+  }
+}
+
+///|
+fn apply_binary_fn(
+  fn_value : Value,
+  lhs : Value,
+  rhs : Value,
+) -> Value raise UiuaMLError {
+  apply(apply(fn_value, lhs), rhs)
+}
+
+///|
+fn builtin_zip(
+  fn_value : Value,
+  lhs : Value,
+  rhs : Value,
+) -> Value raise UiuaMLError {
+  match (lhs, rhs) {
+    (Value::Array(xs), Value::Array(ys)) =>
+      if xs.row_count() == ys.row_count() {
+        let zipped = Array::new(capacity=xs.row_count())
+        let mut row = 0
+        while row < xs.row_count() {
+          zipped.push(
+            apply_binary_fn(fn_value, xs.row_value(row), ys.row_value(row)),
+          )
+          row = row + 1
+        }
+        array_from_items(zipped)
+      } else if xs.row_count() == 1 {
+        let left = xs.row_value(0)
+        let zipped = Array::new(capacity=ys.row_count())
+        let mut row = 0
+        while row < ys.row_count() {
+          zipped.push(apply_binary_fn(fn_value, left, ys.row_value(row)))
+          row = row + 1
+        }
+        array_from_items(zipped)
+      } else if ys.row_count() == 1 {
+        let right = ys.row_value(0)
+        let zipped = Array::new(capacity=xs.row_count())
+        let mut row = 0
+        while row < xs.row_count() {
+          zipped.push(apply_binary_fn(fn_value, xs.row_value(row), right))
+          row = row + 1
+        }
+        array_from_items(zipped)
+      } else {
+        fail(
+          "zip expects arrays with the same number of rows or a single row to broadcast",
+        )
+      }
+    (Value::Array(xs), scalar) => {
+      let zipped = Array::new(capacity=xs.row_count())
+      let mut row = 0
+      while row < xs.row_count() {
+        zipped.push(apply_binary_fn(fn_value, xs.row_value(row), scalar))
+        row = row + 1
+      }
+      array_from_items(zipped)
+    }
+    (scalar, Value::Array(ys)) => {
+      let zipped = Array::new(capacity=ys.row_count())
+      let mut row = 0
+      while row < ys.row_count() {
+        zipped.push(apply_binary_fn(fn_value, scalar, ys.row_value(row)))
+        row = row + 1
+      }
+      array_from_items(zipped)
+    }
+    _ => apply_binary_fn(fn_value, lhs, rhs)
   }
 }
 

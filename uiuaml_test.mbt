@@ -26,6 +26,20 @@ test "arrays inspired by uiua" {
     Ok("[3 7 11]"),
   )
   assert_eq(
+    try? interpret("zip (fun x -> fun y -> x + y) [1, 2, 3] [10, 20, 30]"),
+    Ok("[11 22 33]"),
+  )
+  assert_eq(
+    try? interpret("zip (fun x -> fun y -> x + y) [1, 2, 3] 10"),
+    Ok("[11 12 13]"),
+  )
+  assert_eq(
+    try? interpret(
+      "zip (fun row -> fun bias -> row + bias) [[1, 2], [3, 4], [5, 6]] [[10, 20]]",
+    ),
+    Ok("[[11 22] [13 24] [15 26]]"),
+  )
+  assert_eq(
     try? interpret("reduce (fun acc -> fun x -> acc + x) 0 [1, 2, 3, 4]"),
     Ok("10"),
   )
