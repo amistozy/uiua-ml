@@ -1,65 +1,154 @@
-# amistozy/uiuaml
+# `amistozy/uiuaml`
 
 UiuaML is a small experimental array language implemented in MoonBit.
-It borrows its array-oriented spirit from [Uiua](https://www.uiua.org/) while
-using an ML-like surface syntax with dynamic values.
 
-## Overview
+It is inspired by [Uiua](https://www.uiua.org/), but it uses an ML-like,
+expression-oriented syntax instead of Uiua's tacit stack syntax. The current
+goal is not to reimplement all of Uiua, but to build a compact interpreter with
+a real array runtime, pervasive operations, and a growing set of
+Uiua-flavored primitives.
 
-UiuaML currently provides:
+## Highlights
 
-- ML-like expressions: `let ... in ...`, `fun x -> ...`, function application,
-  and `if ... then ... else ...`
-- Dynamic values: numbers, booleans, arrays, closures, and built-in functions
-- Array literals such as `[1, 2, 3]`
-- Element-wise arithmetic and comparison with scalar broadcasting
-- A small set of Uiua-inspired array primitives
+UiuaML currently supports:
 
-The current implementation is intentionally small and focused on being a
-readable interpreter core rather than a full Uiua port.
+- ML-like expressions:
+  - `let ... in ...`
+  - `fun x -> ...`
+  - function application
+  - `if ... then ... else ...`
+- Dynamic values:
+  - numbers
+  - booleans
+  - arrays
+  - closures
+  - built-in functions with partial application
+- Rectangular array literals such as `[1, 2, 3]` and `[[1, 2], [3, 4]]`
+- A flat `shape + data` array runtime instead of nested list interpretation
+- Pervasive arithmetic and comparisons with scalar and shape-prefix broadcasting
+- A small but useful set of Uiua-inspired array primitives
+- A CLI with `eval` and `run` subcommands built with `argparse`
 
-## Language Sketch
+## Examples
 
-### Basic expressions
+### Core expressions
 
 ```text
 let inc = fun x -> x + 1 in inc 41
-if 1 < 2 then 10 else 20
+let add = fun x -> fun y -> x + y in add 3 4
+if sum [1, 1, 1] == 3 then 42 else 0
 ```
 
-### Arrays and pervasive operations
+### Arrays and broadcasting
 
 ```text
 [1, 2, 3] + 10
 [1, 2, 3] + [10, 20, 30]
-sum [1, 2, 3, 4]
+[10, 20] + [[3, 4, 5], [6, 7, 8]]
 ```
 
-### Built-ins
+### Array-oriented built-ins
 
-The interpreter currently includes these built-ins:
+```text
+shape [[1, 2], [3, 4]]
+transpose [[1, 2, 3], [4, 5, 6]]
+select (where [0, 1, 0, 1]) [2, 8, 3, 9]
+windows 3 [1, 2, 3, 4, 5]
+orient [1, 0] [[1, 2, 3], [4, 5, 6]]
+```
+
+## Built-ins
+
+UiuaML currently provides the following built-ins.
+
+### Shape and indexing
+
+- `shape`
+- `rank`
+- `len`
+- `first`
+- `last`
+- `pick`
+- `select`
+- `where`
+
+### Structural array operations
 
 - `range`
 - `iota`
-- `shape`
-- `sum`
-- `first`
 - `reverse`
-- `len`
+- `deshape`
 - `reshape`
 - `append`
+- `take`
+- `drop`
+- `windows`
+
+### Axis operations
+
+- `transpose`
+- `orient`
+- `rotate`
+
+### Aggregation and filtering
+
+- `sum`
+- `keep`
+
+## Array Model
+
+UiuaML uses a flat array representation:
+
+- every array has a `shape`
+- all leaf elements are stored in row-major order
+- arrays must be rectangular
+
+This is much closer to Uiua's array model than interpreting arrays as arbitrary
+nested lists. It makes shape-driven operations such as `reshape`, `transpose`,
+`orient`, `windows`, `pick`, and broadcasting much easier to define precisely.
+
+### Broadcasting
+
+Binary arithmetic and comparison operators are pervasive:
+
+- scalars broadcast across arrays
+- arrays with the same shape combine element-wise
+- arrays can also combine with a larger array when one shape is a prefix of the
+  other
 
 Examples:
 
 ```text
-range 5
-shape [[1, 2], [3, 4]]
-reshape [2, 3] [1, 2, 3, 4]
+[1, 2, 3] + 10
+[1, 2, 3] + [10, 20, 30]
+[10, 20] + [[3, 4, 5], [6, 7, 8]]
+```
+
+## Syntax Notes
+
+### Comments
+
+Line comments start with `#`.
+
+```text
+let xs = range 4 # build a vector
+in sum xs
+```
+
+### Negative numbers
+
+Negative values work in ordinary expressions and builtin calls.
+
+```text
+take -2 [1, 2, 3, 4, 5]
+drop -2 [1, 2, 3, 4, 5]
+rotate -1 [[1, 2], [3, 4], [5, 6]]
 ```
 
 ## CLI
 
-The CLI is implemented with `moonbitlang/core/argparse`.
+The command line interface lives in `cmd/main` and uses
+`moonbitlang/core/argparse`.
 
 ### Evaluate an expression
 
@@ -67,7 +156,7 @@ The CLI is implemented with `moonbitlang/core/argparse`.
 moon run cmd/main -- eval "sum [1, 2, 3, 4]"
 ```
 
-### Run a source file
+### Evaluate a file
 
 ```bash
 moon run cmd/main -- run program.ua
@@ -81,26 +170,41 @@ moon run cmd/main -- --help
 
 ## Library API
 
-The main public entry point is:
+The public entry point is:
 
 ```mbt nocheck
 pub fn interpret(source : StringView) -> String raise UiuaMLError
 ```
 
-It parses, evaluates, and renders the result as a string.
+It tokenizes, parses, evaluates, and renders the final value.
 
 Example:
 
 ```mbt nocheck
 ///|
-test "interpret a simple expression" {
+test "interpret an expression" {
   assert_eq(interpret("sum [1, 2, 3, 4]"), "10")
 }
 ```
 
+## Project Layout
+
+The interpreter is now split into a few focused files:
+
+- `uiuaml.mbt`
+  - public API and error type
+- `syntax.mbt`
+  - tokenizer, AST, and parser
+- `value.mbt`
+  - runtime values, flat arrays, rendering, and array helpers
+- `eval.mbt`
+  - evaluator, environment, pervasive operators, and built-ins
+- `cmd/main/main.mbt`
+  - command line interface
+
 ## Development
 
-Format, refresh package interface files, and run tests with:
+Useful commands:
 
 ```bash
 moon info
@@ -108,10 +212,19 @@ moon fmt
 moon test
 ```
 
-## Current Limitations
+## Current Scope
 
-- This is not a full Uiua implementation.
-- The array model is currently simple nested arrays rather than a dedicated
-  rank/shape runtime.
-- The language is dynamically typed and intentionally minimal.
-- Error reporting is functional but still basic.
+UiuaML is still intentionally small.
+
+It does not aim to be a full Uiua implementation, and several advanced Uiua
+features are still missing, including:
+
+- boxes and heterogeneous arrays
+- modifiers and tacit syntax
+- fill semantics for more structural operations
+- general inversion support
+- modules and larger source-file language features
+
+That said, the interpreter now has a real array runtime and enough primitives to
+experiment with a meaningful subset of array programming ideas in an ML-like
+surface language.
