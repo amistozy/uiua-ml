@@ -19,6 +19,7 @@ fn default_env() -> Env {
   |> bind_builtin("select", 2)
   |> bind_builtin("keep", 2)
   |> bind_builtin("windows", 2)
+  |> bind_builtin("orient", 2)
   |> bind_builtin("rotate", 2)
   |> bind_builtin("transpose", 1)
   |> bind_builtin("append", 2)
@@ -302,6 +303,7 @@ fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
     "select" => builtin_select(args[0], args[1])
     "keep" => builtin_keep(args[0], args[1])
     "windows" => builtin_windows(args[0], args[1])
+    "orient" => builtin_orient(args[0], args[1])
     "rotate" => builtin_rotate(args[0], args[1])
     "transpose" => builtin_transpose(args[0])
     "append" => builtin_append(args[0], args[1])
@@ -528,6 +530,15 @@ fn builtin_windows(size : Value, arg : Value) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => Value::Array(array.window_rows(n))
     _ => fail("windows expects an array")
+  }
+}
+
+///|
+fn builtin_orient(axes : Value, arg : Value) -> Value raise UiuaMLError {
+  let indices = as_index_vector(axes, "orient")
+  match arg {
+    Value::Array(array) => Value::Array(array.oriented(indices))
+    _ => fail("orient expects an array")
   }
 }
 

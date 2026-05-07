@@ -61,6 +61,14 @@ test "arrays inspired by uiua" {
     try? interpret("windows 2 [[1, 2], [3, 4], [5, 6]]"),
     Ok("[[[1 2] [3 4]] [[3 4] [5 6]]]"),
   )
+  assert_eq(
+    try? interpret("orient [1, 0] [[1, 2, 3], [4, 5, 6]]"),
+    Ok("[[1 4] [2 5] [3 6]]"),
+  )
+  assert_eq(
+    try? interpret("orient [2, 0] [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]"),
+    Ok("[[[1 3] [5 7]] [[2 4] [6 8]]]"),
+  )
   assert_eq(try? interpret("rotate 2 [1, 2, 3, 4, 5]"), Ok("[3 4 5 1 2]"))
   assert_eq(
     try? interpret("rotate -1 [[1, 2], [3, 4], [5, 6]]"),

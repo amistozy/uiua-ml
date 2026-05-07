@@ -430,6 +430,59 @@ fn UiArray::window_rows(
 }
 
 ///|
+fn UiArray::oriented(
+  self : UiArray,
+  axes : Array[Int],
+) -> UiArray raise UiuaMLError {
+  let rank = self.rank()
+  guard axes.length() <= rank else {
+    fail("Cannot orient rank \{rank} array with \{axes.length()} axes")
+  }
+  let perm = Array::new(capacity=rank)
+  for axis in axes {
+    guard axis >= 0 && axis < rank else {
+      fail("Cannot orient axis \{axis} in array of rank \{rank}")
+    }
+    guard !perm.contains(axis) else { fail("Orient axes must be unique") }
+    perm.push(axis)
+  }
+  let mut axis = 0
+  while axis < rank {
+    if !perm.contains(axis) {
+      perm.push(axis)
+    }
+    axis = axis + 1
+  }
+  if rank <= 1 || perm.length() <= 1 {
+    return self
+  }
+  let shape = Array::new(capacity=rank)
+  for axis in perm {
+    shape.push(self.shape[axis])
+  }
+  let count = self.element_count()
+  let data = Array::new(capacity=count)
+  let mut flat = 0
+  while flat < count {
+    let new_indices = flat_to_indices(shape, flat)
+    let old_indices = Array::new(capacity=rank)
+    let mut i = 0
+    while i < rank {
+      old_indices.push(0)
+      i = i + 1
+    }
+    i = 0
+    while i < rank {
+      old_indices[perm[i]] = new_indices[i]
+      i = i + 1
+    }
+    data.push(self.data[indices_to_flat(self.shape, old_indices)])
+    flat = flat + 1
+  }
+  { shape, data }
+}
+
+///|
 fn UiArray::transposed(self : UiArray) -> UiArray {
   if self.rank() <= 1 {
     return self

@@ -117,3 +117,21 @@ test "windows creates overlapping leading-axis slices" {
     "[[[1 2] [3 4] [5 6]] [[3 4] [5 6] [7 8]]]",
   )
 }
+
+///|
+test "orient reorders axes and appends unspecified ones" {
+  let array = make_array([2, 2, 2], [
+    Value::Num(1.0),
+    Value::Num(2.0),
+    Value::Num(3.0),
+    Value::Num(4.0),
+    Value::Num(5.0),
+    Value::Num(6.0),
+    Value::Num(7.0),
+    Value::Num(8.0),
+  ])
+  guard array is Value::Array(arr) else { panic() }
+  let oriented = arr.oriented([2, 0])
+  assert_eq(oriented.shape, [2, 2, 2])
+  assert_eq(Value::Array(oriented).render(), "[[[1 3] [5 7]] [[2 4] [6 8]]]")
+}
