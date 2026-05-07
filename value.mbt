@@ -24,7 +24,7 @@ priv enum Value {
 }
 
 ///|
-fn shape_is_prefix(prefix : Array[Int], shape : Array[Int]) -> Bool {
+fn shape_is_prefix(prefix : ArrayView[Int], shape : ArrayView[Int]) -> Bool {
   if prefix.length() > shape.length() {
     return false
   }
@@ -39,21 +39,27 @@ fn shape_is_prefix(prefix : Array[Int], shape : Array[Int]) -> Bool {
 }
 
 ///|
-fn suffix_element_count(shape : Array[Int], start : Int) -> Int {
-  element_count_for_shape(shape[start:].to_owned())
+fn suffix_element_count(shape : ArrayView[Int], start : Int) -> Int {
+  let mut count = 1
+  let mut i = start
+  while i < shape.length() {
+    count = count * shape[i]
+    i = i + 1
+  }
+  count
 }
 
 ///|
-fn render_shape(shape : Array[Int]) -> String {
+fn render_shape(shape : ArrayView[Int]) -> String {
   let body = shape.map(n => n.to_string()).join(" ")
   "[\{body}]"
 }
 
 ///|
 fn[T] fail_shape_mismatch(
-  op : String,
-  lhs_shape : Array[Int],
-  rhs_shape : Array[Int],
+  op : StringView,
+  lhs_shape : ArrayView[Int],
+  rhs_shape : ArrayView[Int],
 ) -> T raise UiuaMLError {
   fail(
     "\{op} shape mismatch: \{render_shape(lhs_shape)} vs \{render_shape(rhs_shape)}",
@@ -131,14 +137,7 @@ fn sum_numbers(value : Value) -> Double raise UiuaMLError {
 ///|
 fn any_truthy(value : Value) -> Bool {
   match value {
-    Value::Array(array) => {
-      for item in array.data {
-        if any_truthy(item) {
-          return true
-        }
-      }
-      false
-    }
+    Value::Array(array) => array.data.any(any_truthy)
     _ => truthy(value)
   }
 }
@@ -146,14 +145,7 @@ fn any_truthy(value : Value) -> Bool {
 ///|
 fn all_truthy(value : Value) -> Bool {
   match value {
-    Value::Array(array) => {
-      for item in array.data {
-        if !all_truthy(item) {
-          return false
-        }
-      }
-      true
-    }
+    Value::Array(array) => array.data.all(all_truthy)
     _ => truthy(value)
   }
 }
@@ -161,13 +153,8 @@ fn all_truthy(value : Value) -> Bool {
 ///|
 fn count_truthy(value : Value) -> Int {
   match value {
-    Value::Array(array) => {
-      let mut count = 0
-      for item in array.data {
-        count = count + count_truthy(item)
-      }
-      count
-    }
+    Value::Array(array) =>
+      array.data.fold(init=0, (count, item) => count + count_truthy(item))
     _ => if truthy(value) { 1 } else { 0 }
   }
 }
@@ -182,14 +169,14 @@ fn make_array(
 }
 
 ///|
-fn validate_shape(shape : Array[Int], len : Int) -> Unit raise UiuaMLError {
+fn validate_shape(shape : ArrayView[Int], len : Int) -> Unit raise UiuaMLError {
   guard element_count_for_shape(shape) == len else {
     fail("Shape \{render_shape(shape)} does not match element count \{len}")
   }
 }
 
 ///|
-fn element_count_for_shape(shape : Array[Int]) -> Int {
+fn element_count_for_shape(shape : ArrayView[Int]) -> Int {
   if shape.is_empty() {
     return 1
   }
@@ -331,7 +318,7 @@ fn UiArray::append_rows(
     data.push(item)
   }
   let shape = [self.row_count() + other.row_count()]
-  for dim in self.row_shape() {
+  for dim in self.shape[1:] {
     shape.push(dim)
   }
   validate_shape(shape, data.length())
@@ -433,7 +420,7 @@ fn UiArray::slice_rows(
 ///|
 fn UiArray::select_rows(
   self : UiArray,
-  indices : Array[Int],
+  indices : ArrayView[Int],
 ) -> UiArray raise UiuaMLError {
   let row_shape = self.row_shape()
   let row_len = self.row_len()
@@ -458,7 +445,7 @@ fn UiArray::select_rows(
 ///|
 fn UiArray::select_rows_filled(
   self : UiArray,
-  indices : Array[Int],
+  indices : ArrayView[Int],
   fill : Value,
 ) -> UiArray raise UiuaMLError {
   let row_shape = self.row_shape()
@@ -845,7 +832,7 @@ fn UiArray::rotated_rows_filled(
 }
 
 ///|
-fn flat_to_indices(shape : Array[Int], flat : Int) -> Array[Int] {
+fn flat_to_indices(shape : ArrayView[Int], flat : Int) -> Array[Int] {
   if shape.is_empty() {
     return []
   }
@@ -864,7 +851,7 @@ fn flat_to_indices(shape : Array[Int], flat : Int) -> Array[Int] {
 }
 
 ///|
-fn indices_to_flat(shape : Array[Int], indices : Array[Int]) -> Int {
+fn indices_to_flat(shape : ArrayView[Int], indices : ArrayView[Int]) -> Int {
   let mut flat = 0
   let mut stride = 1
   let mut i = shape.length() - 1
@@ -887,7 +874,11 @@ fn as_nat(value : Value) -> Int raise UiuaMLError {
 }
 
 ///|
-fn normalize_axis(axis : Int, rank : Int, op : String) -> Int raise UiuaMLError {
+fn normalize_axis(
+  axis : Int,
+  rank : Int,
+  op : StringView,
+) -> Int raise UiuaMLError {
   let normalized = if axis >= 0 { axis } else { rank + axis }
   guard normalized >= 0 && normalized < rank else {
     fail("Cannot \{op} axis \{axis} in array of rank \{rank}")
@@ -899,7 +890,7 @@ fn normalize_axis(axis : Int, rank : Int, op : String) -> Int raise UiuaMLError 
 fn normalize_row_index(
   index : Int,
   row_count : Int,
-  op : String,
+  op : StringView,
 ) -> Int raise UiuaMLError {
   let normalized = if index >= 0 { index } else { row_count + index }
   guard normalized >= 0 && normalized < row_count else {
@@ -909,7 +900,7 @@ fn normalize_row_index(
 }
 
 ///|
-fn count_duplicate_axes(axes : Array[Int]) -> Int {
+fn count_duplicate_axes(axes : ArrayView[Int]) -> Int {
   let seen = Array::new()
   let mut duplicates = 0
   for axis in axes {
@@ -939,7 +930,7 @@ fn as_int(value : Value) -> Int raise UiuaMLError {
 ///|
 fn as_index_vector(
   value : Value,
-  name : String,
+  name : StringView,
 ) -> Array[Int] raise UiuaMLError {
   match value {
     Value::Num(_) => [as_int(value)]
@@ -960,7 +951,7 @@ fn as_index_vector(
 ///|
 fn as_shaped_indices(
   value : Value,
-  name : String,
+  name : StringView,
 ) -> (Array[Int], Array[Int]) raise UiuaMLError {
   match value {
     Value::Num(_) => ([], [as_int(value)])
@@ -978,7 +969,7 @@ fn as_shaped_indices(
 ///|
 fn pick_from(
   value : Value,
-  indices : Array[Int],
+  indices : ArrayView[Int],
   fill : Value?,
 ) -> Value raise UiuaMLError {
   if indices.is_empty() {
@@ -1013,7 +1004,7 @@ fn pick_from(
         )
       }
       let row = array.row_value(normalized)
-      pick_from(row, indices[1:].to_owned(), fill)
+      pick_from(row, indices[1:], fill)
     }
     _ => fail("Cannot pick deeper into a scalar value")
   }
@@ -1022,8 +1013,8 @@ fn pick_from(
 ///|
 fn pick_with_selector(
   value : Value,
-  selector_shape : Array[Int],
-  indices : Array[Int],
+  selector_shape : ArrayView[Int],
+  indices : ArrayView[Int],
   fill : Value?,
 ) -> Value raise UiuaMLError {
   if selector_shape.length() <= 1 {
@@ -1037,11 +1028,16 @@ fn pick_with_selector(
     )
   }
   let expected_shape = selector_shape[0:selector_shape.length() - 1].to_owned()
-  for dim in value_shape[index_len:].to_owned() {
+  for dim in value_shape[index_len:] {
     expected_shape.push(dim)
   }
   let row_count = selector_shape[0]
-  let row_len = suffix_element_count(selector_shape, 1)
+  let mut row_len = 1
+  let mut shape_i = 1
+  while shape_i < selector_shape.length() {
+    row_len = row_len * selector_shape[shape_i]
+    shape_i = shape_i + 1
+  }
   if row_count == 0 {
     return make_array(expected_shape, [])
   }
@@ -1051,12 +1047,7 @@ fn pick_with_selector(
     let start = row * row_len
     let end = start + row_len
     picked.push(
-      pick_with_selector(
-        value,
-        selector_shape[1:].to_owned(),
-        indices[start:end].to_owned(),
-        fill,
-      ),
+      pick_with_selector(value, selector_shape[1:], indices[start:end], fill),
     )
     row = row + 1
   }
@@ -1070,8 +1061,8 @@ fn pick_with_selector(
 ///|
 fn select_with_selector(
   array : UiArray,
-  selector_shape : Array[Int],
-  indices : Array[Int],
+  selector_shape : ArrayView[Int],
+  indices : ArrayView[Int],
   fill : Value?,
 ) -> Value raise UiuaMLError {
   if selector_shape.is_empty() {
@@ -1085,12 +1076,17 @@ fn select_with_selector(
       },
     )
   }
-  let expected_shape = selector_shape.copy()
+  let expected_shape = selector_shape.to_owned()
   for dim in array.row_shape() {
     expected_shape.push(dim)
   }
   let row_count = selector_shape[0]
-  let row_len = suffix_element_count(selector_shape, 1)
+  let mut row_len = 1
+  let mut shape_i = 1
+  while shape_i < selector_shape.length() {
+    row_len = row_len * selector_shape[shape_i]
+    shape_i = shape_i + 1
+  }
   if row_count == 0 {
     return make_array(expected_shape, [])
   }
@@ -1100,12 +1096,7 @@ fn select_with_selector(
     let start = row * row_len
     let end = start + row_len
     selected.push(
-      select_with_selector(
-        array,
-        selector_shape[1:].to_owned(),
-        indices[start:end].to_owned(),
-        fill,
-      ),
+      select_with_selector(array, selector_shape[1:], indices[start:end], fill),
     )
     row = row + 1
   }
@@ -1140,12 +1131,12 @@ fn fill_row_for_shape(
 
 ///|
 fn fill_value_for_shape(
-  shape : Array[Int],
+  shape : ArrayView[Int],
   fill : Value,
-  op : String,
+  op : StringView,
 ) -> Value raise UiuaMLError {
   let fill_shape = infer_shape(fill)
-  if fill_shape == shape {
+  if fill_shape == shape.to_owned() {
     return fill
   }
   if fill_shape.is_empty() {
@@ -1159,7 +1150,7 @@ fn fill_value_for_shape(
       data.push(fill)
       i = i + 1
     }
-    return make_array(shape, data)
+    return make_array(shape.to_owned(), data)
   }
   fail(
     "\{op} fill shape mismatch: expected \{render_shape(shape)}, got \{render_shape(fill_shape)}",
@@ -1167,7 +1158,7 @@ fn fill_value_for_shape(
 }
 
 ///|
-fn expect_fill_scalar(fill : Value, op : String) -> Value raise UiuaMLError {
+fn expect_fill_scalar(fill : Value, op : StringView) -> Value raise UiuaMLError {
   guard infer_shape(fill).is_empty() else {
     fail(
       "\{op} expects a scalar fill value, got \{render_shape(infer_shape(fill))}",

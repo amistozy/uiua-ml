@@ -171,13 +171,11 @@ fn ordering_compare_error(_lhs : Value, _rhs : Value) -> Bool raise UiuaMLError 
 fn negate_bools(value : Value) -> Value raise UiuaMLError {
   match value {
     Value::Bool(b) => Value::Bool(!b)
-    Value::Array(array) => {
-      let result = Array::new(capacity=array.element_count())
-      for item in array.data {
-        result.push(negate_bools(item))
-      }
-      Value::Array(UiArray::{ shape: array.shape, data: result })
-    }
+    Value::Array(array) =>
+      Value::Array(UiArray::{
+        shape: array.shape,
+        data: array.data.map(negate_bools),
+      })
     _ => fail("Expected boolean result")
   }
 }
@@ -189,13 +187,11 @@ fn broadcast_unary(
 ) -> Value raise UiuaMLError {
   match value {
     Value::Num(n) => f(n)
-    Value::Array(array) => {
-      let result = Array::new(capacity=array.element_count())
-      for item in array.data {
-        result.push(broadcast_unary(item, f))
-      }
-      Value::Array(UiArray::{ shape: array.shape, data: result })
-    }
+    Value::Array(array) =>
+      Value::Array(UiArray::{
+        shape: array.shape,
+        data: array.data.map(item => broadcast_unary(item, f)),
+      })
     _ => fail("Numeric operation expects numbers or arrays of numbers")
   }
 }
@@ -250,11 +246,10 @@ fn map_array_left(
   scalar : Value,
   op_scalar : (Value, Value) -> Value raise UiuaMLError,
 ) -> Value raise UiuaMLError {
-  let data = Array::new(capacity=array.element_count())
-  for item in array.data {
-    data.push(op_scalar(item, scalar))
-  }
-  Value::Array(UiArray::{ shape: array.shape, data })
+  Value::Array(UiArray::{
+    shape: array.shape,
+    data: array.data.map(item => op_scalar(item, scalar)),
+  })
 }
 
 ///|
@@ -263,11 +258,10 @@ fn map_array_right(
   array : UiArray,
   op_scalar : (Value, Value) -> Value raise UiuaMLError,
 ) -> Value raise UiuaMLError {
-  let data = Array::new(capacity=array.element_count())
-  for item in array.data {
-    data.push(op_scalar(scalar, item))
-  }
-  Value::Array(UiArray::{ shape: array.shape, data })
+  Value::Array(UiArray::{
+    shape: array.shape,
+    data: array.data.map(item => op_scalar(scalar, item)),
+  })
 }
 
 ///|
@@ -371,10 +365,7 @@ fn builtin_range(arg : Value) -> Value raise UiuaMLError {
 ///|
 fn builtin_shape(arg : Value) -> Value raise UiuaMLError {
   let dims = infer_shape(arg)
-  let data = Array::new(capacity=dims.length())
-  for dim in dims {
-    data.push(Value::Num(Double::from_int(dim)))
-  }
+  let data = dims.map(dim => Value::Num(Double::from_int(dim)))
   make_array([data.length()], data)
 }
 
@@ -886,11 +877,7 @@ fn keep_indices(mask : Value) -> Array[Bool] raise UiuaMLError {
       guard array.rank() <= 1 else {
         fail("keep expects a boolean or numeric mask vector")
       }
-      let result = Array::new(capacity=array.element_count())
-      for item in array.data {
-        result.push(truthy(item))
-      }
-      result
+      array.data.map(truthy)
     }
     _ => fail("keep expects a boolean or numeric mask vector")
   }
