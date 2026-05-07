@@ -439,7 +439,10 @@ fn UiArray::select_rows(
   let row_len = self.row_len()
   let data = Array::new(capacity=indices.length() * row_len)
   for index in indices {
-    let row = self.checked_row_value(index, "select")
+    let row = self.checked_row_value(
+      normalize_row_index(index, self.row_count(), "select"),
+      "select",
+    )
     for item in flat_values(row) {
       data.push(item)
     }
@@ -574,9 +577,7 @@ fn UiArray::oriented(
   }
   let perm = Array::new(capacity=rank)
   for axis in axes {
-    guard axis >= 0 && axis < rank else {
-      fail("Cannot orient axis \{axis} in array of rank \{rank}")
-    }
+    let axis = normalize_axis(axis, rank, "orient")
     guard !perm.contains(axis) else { fail("Orient axes must be unique") }
     perm.push(axis)
   }
@@ -614,6 +615,64 @@ fn UiArray::oriented(
     flat = flat + 1
   }
   { shape, data }
+}
+
+///|
+fn UiArray::oriented_filled(
+  self : UiArray,
+  axes : Array[Int],
+  fill : Value,
+) -> UiArray raise UiuaMLError {
+  let rank = self.rank()
+  let normalized = Array::new(capacity=axes.length())
+  for axis in axes {
+    normalized.push(normalize_axis(axis, rank, "orient"))
+  }
+  let duplicate_count = count_duplicate_axes(normalized)
+  let perm = normalized.copy()
+  let mut axis = 0
+  while axis < rank {
+    if !perm.contains(axis) {
+      perm.push(axis)
+    }
+    axis = axis + 1
+  }
+  let shape = Array::new(capacity=rank + duplicate_count)
+  let mut i = 0
+  while i < normalized.length() {
+    shape.push(self.shape[normalized[i]])
+    i = i + 1
+  }
+  axis = 0
+  while axis < rank {
+    if !normalized.contains(axis) {
+      shape.push(self.shape[axis])
+    }
+    axis = axis + 1
+  }
+  let fill_scalar = expect_fill_scalar(fill, "orient")
+  let count = element_count_for_shape(shape)
+  let data = Array::new(capacity=count)
+  let mut flat = 0
+  while flat < count {
+    data.push(fill_scalar)
+    flat = flat + 1
+  }
+  let out = UiArray::{ shape, data }
+  let mut orig_flat = 0
+  while orig_flat < self.element_count() {
+    let orig_index = flat_to_indices(self.shape, orig_flat)
+    let into_index = Array::new(capacity=out.rank())
+    let mut j = 0
+    while j < perm.length() {
+      into_index.push(orig_index[perm[j]])
+      j = j + 1
+    }
+    let out_flat = indices_to_flat(out.shape, into_index)
+    out.data[out_flat] = self.data[orig_flat]
+    orig_flat = orig_flat + 1
+  }
+  out
 }
 
 ///|
@@ -828,6 +887,42 @@ fn as_nat(value : Value) -> Int raise UiuaMLError {
 }
 
 ///|
+fn normalize_axis(axis : Int, rank : Int, op : String) -> Int raise UiuaMLError {
+  let normalized = if axis >= 0 { axis } else { rank + axis }
+  guard normalized >= 0 && normalized < rank else {
+    fail("Cannot \{op} axis \{axis} in array of rank \{rank}")
+  }
+  normalized
+}
+
+///|
+fn normalize_row_index(
+  index : Int,
+  row_count : Int,
+  op : String,
+) -> Int raise UiuaMLError {
+  let normalized = if index >= 0 { index } else { row_count + index }
+  guard normalized >= 0 && normalized < row_count else {
+    fail("\{op} index \{index} is out of bounds for \{row_count} rows")
+  }
+  normalized
+}
+
+///|
+fn count_duplicate_axes(axes : Array[Int]) -> Int {
+  let seen = Array::new()
+  let mut duplicates = 0
+  for axis in axes {
+    if seen.contains(axis) {
+      duplicates = duplicates + 1
+    } else {
+      seen.push(axis)
+    }
+  }
+  duplicates
+}
+
+///|
 fn as_int(value : Value) -> Int raise UiuaMLError {
   match value {
     Value::Num(n) => {
@@ -859,6 +954,24 @@ fn as_index_vector(
       indices
     }
     _ => fail("\{name} expects an integer or a vector of integers")
+  }
+}
+
+///|
+fn as_shaped_indices(
+  value : Value,
+  name : String,
+) -> (Array[Int], Array[Int]) raise UiuaMLError {
+  match value {
+    Value::Num(_) => ([], [as_int(value)])
+    Value::Array(array) => {
+      let indices = Array::new(capacity=array.element_count())
+      for item in array.data {
+        indices.push(as_int(item))
+      }
+      (array.shape, indices)
+    }
+    _ => fail("\{name} expects an integer or an array of integers")
   }
 }
 
@@ -904,6 +1017,103 @@ fn pick_from(
     }
     _ => fail("Cannot pick deeper into a scalar value")
   }
+}
+
+///|
+fn pick_with_selector(
+  value : Value,
+  selector_shape : Array[Int],
+  indices : Array[Int],
+  fill : Value?,
+) -> Value raise UiuaMLError {
+  if selector_shape.length() <= 1 {
+    return pick_from(value, indices, fill)
+  }
+  let value_shape = infer_shape(value)
+  let index_len = selector_shape[selector_shape.length() - 1]
+  guard index_len <= value_shape.length() else {
+    fail(
+      "Cannot pick from rank \{value_shape.length()} value with index length \{index_len}",
+    )
+  }
+  let expected_shape = selector_shape[0:selector_shape.length() - 1].to_owned()
+  for dim in value_shape[index_len:].to_owned() {
+    expected_shape.push(dim)
+  }
+  let row_count = selector_shape[0]
+  let row_len = suffix_element_count(selector_shape, 1)
+  if row_count == 0 {
+    return make_array(expected_shape, [])
+  }
+  let picked = Array::new(capacity=row_count)
+  let mut row = 0
+  while row < row_count {
+    let start = row * row_len
+    let end = start + row_len
+    picked.push(
+      pick_with_selector(
+        value,
+        selector_shape[1:].to_owned(),
+        indices[start:end].to_owned(),
+        fill,
+      ),
+    )
+    row = row + 1
+  }
+  let result = array_from_items(picked)
+  guard infer_shape(result) == expected_shape else {
+    fail("pick produced an unexpected shape")
+  }
+  result
+}
+
+///|
+fn select_with_selector(
+  array : UiArray,
+  selector_shape : Array[Int],
+  indices : Array[Int],
+  fill : Value?,
+) -> Value raise UiuaMLError {
+  if selector_shape.is_empty() {
+    return pick_from(Value::Array(array), indices, fill)
+  }
+  if selector_shape.length() == 1 {
+    return Value::Array(
+      match fill {
+        Some(fill_value) => array.select_rows_filled(indices, fill_value)
+        None => array.select_rows(indices)
+      },
+    )
+  }
+  let expected_shape = selector_shape.copy()
+  for dim in array.row_shape() {
+    expected_shape.push(dim)
+  }
+  let row_count = selector_shape[0]
+  let row_len = suffix_element_count(selector_shape, 1)
+  if row_count == 0 {
+    return make_array(expected_shape, [])
+  }
+  let selected = Array::new(capacity=row_count)
+  let mut row = 0
+  while row < row_count {
+    let start = row * row_len
+    let end = start + row_len
+    selected.push(
+      select_with_selector(
+        array,
+        selector_shape[1:].to_owned(),
+        indices[start:end].to_owned(),
+        fill,
+      ),
+    )
+    row = row + 1
+  }
+  let result = array_from_items(selected)
+  guard infer_shape(result) == expected_shape else {
+    fail("select produced an unexpected shape")
+  }
+  result
 }
 
 ///|

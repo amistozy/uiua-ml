@@ -99,8 +99,20 @@ test "arrays inspired by uiua" {
   assert_eq(try? interpret("pick 2 [3, 8, 4, 1]"), Ok("4"))
   assert_eq(try? interpret("pick [1, 1] [[1, 2, 3], [4, 5, 6]]"), Ok("5"))
   assert_eq(
+    try? interpret("pick [[1, 2], [0, 1]] [[1, 2, 3], [4, 5, 6]]"),
+    Ok("[6 2]"),
+  )
+  assert_eq(
     try? interpret("select [0, 2, 1, 1] [[1, 2], [3, 4], [5, 6]]"),
     Ok("[[1 2] [5 6] [3 4] [3 4]]"),
+  )
+  assert_eq(
+    try? interpret("select [[0, 1], [1, 2], [2, 0]] [2, 3, 5, 7]"),
+    Ok("[[2 3] [3 5] [5 2]]"),
+  )
+  assert_eq(
+    try? interpret("select [[0, 1], [1, 2], [2, 0]] [[1, 2], [3, 4], [5, 6]]"),
+    Ok("[[[1 2] [3 4]] [[3 4] [5 6]] [[5 6] [1 2]]]"),
   )
   assert_eq(
     try? interpret("keep [0, 1, 0, 1, 1, 0, 0] [2, 8, 3, 9, 1, 7, 2]"),
@@ -129,6 +141,10 @@ test "arrays inspired by uiua" {
   assert_eq(
     try? interpret("orient [2, 0] [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]"),
     Ok("[[[1 3] [5 7]] [[2 4] [6 8]]]"),
+  )
+  assert_eq(
+    try? interpret("orient [-1] [[1, 2, 3], [4, 5, 6]]"),
+    Ok("[[1 4] [2 5] [3 6]]"),
   )
   assert_eq(try? interpret("rotate 2 [1, 2, 3, 4, 5]"), Ok("[3 4 5 1 2]"))
   assert_eq(
@@ -173,12 +189,28 @@ test "fill semantics for structural operations" {
     Ok("[[1 2] [9 9] [9 9]]"),
   )
   assert_eq(
+    try? interpret("fill 0 in pick [[1, 2], [9, 9]] [[1, 2, 3], [4, 5, 6]]"),
+    Ok("[6 0]"),
+  )
+  assert_eq(
+    try? interpret("fill [9, 9] in select [[0, 1], [9, -1]] [[1, 2], [3, 4]]"),
+    Ok("[[[1 2] [3 4]] [[9 9] [9 9]]]"),
+  )
+  assert_eq(
     try? interpret("fill 0 in reshape [2, 3] [1, 2, 3, 4]"),
     Ok("[[1 2 3] [4 0 0]]"),
   )
   assert_eq(
     try? interpret("fill 0 in windows 3 [1, 2, 3]"),
     Ok("[[0 0 1] [0 1 2] [1 2 3] [2 3 0] [3 0 0]]"),
+  )
+  assert_eq(
+    try? interpret("fill 0 in orient [0, 0] [1, 2, 3, 4]"),
+    Ok("[[1 0 0 0] [0 2 0 0] [0 0 3 0] [0 0 0 4]]"),
+  )
+  assert_eq(
+    try? interpret("fill 0 in orient [0, 1, 1] [[1, 2], [3, 4]]"),
+    Ok("[[[1 0] [0 2]] [[3 0] [0 4]]]"),
   )
 }
 

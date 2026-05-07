@@ -348,7 +348,7 @@ fn run_builtin(
     "select" => builtin_select(args[0], args[1], fill)
     "keep" => builtin_keep(args[0], args[1])
     "windows" => builtin_windows(args[0], args[1], fill)
-    "orient" => builtin_orient(args[0], args[1])
+    "orient" => builtin_orient(args[0], args[1], fill)
     "rotate" => builtin_rotate(args[0], args[1], fill)
     "transpose" => builtin_transpose(args[0])
     "append" => builtin_append(args[0], args[1])
@@ -769,8 +769,8 @@ fn builtin_pick(
   arg : Value,
   fill : Value?,
 ) -> Value raise UiuaMLError {
-  let indices = as_index_vector(index, "pick")
-  pick_from(arg, indices, fill)
+  let (selector_shape, indices) = as_shaped_indices(index, "pick")
+  pick_with_selector(arg, selector_shape, indices, fill)
 }
 
 ///|
@@ -779,14 +779,10 @@ fn builtin_select(
   arg : Value,
   fill : Value?,
 ) -> Value raise UiuaMLError {
-  let rows = as_index_vector(indices, "select")
   match arg {
     Value::Array(array) => {
-      let next = match fill {
-        Some(fill_value) => array.select_rows_filled(rows, fill_value)
-        None => array.select_rows(rows)
-      }
-      Value::Array(next)
+      let (selector_shape, row_indices) = as_shaped_indices(indices, "select")
+      select_with_selector(array, selector_shape, row_indices, fill)
     }
     _ => fail("select expects an array")
   }
@@ -836,10 +832,20 @@ fn builtin_windows(
 }
 
 ///|
-fn builtin_orient(axes : Value, arg : Value) -> Value raise UiuaMLError {
+fn builtin_orient(
+  axes : Value,
+  arg : Value,
+  fill : Value?,
+) -> Value raise UiuaMLError {
   let indices = as_index_vector(axes, "orient")
   match arg {
-    Value::Array(array) => Value::Array(array.oriented(indices))
+    Value::Array(array) => {
+      let next = match fill {
+        Some(fill_value) => array.oriented_filled(indices, fill_value)
+        None => array.oriented(indices)
+      }
+      Value::Array(next)
+    }
     _ => fail("orient expects an array")
   }
 }
