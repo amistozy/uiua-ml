@@ -26,6 +26,18 @@ test "arrays inspired by uiua" {
     Ok("[3 7 11]"),
   )
   assert_eq(
+    try? interpret("filter (fun x -> x > 2) [1, 2, 3, 4, 5]"),
+    Ok("[3 4 5]"),
+  )
+  assert_eq(
+    try? interpret("filter (fun row -> sum row > 6) [[1, 2], [3, 4], [5, 6]]"),
+    Ok("[[3 4] [5 6]]"),
+  )
+  assert_eq(
+    try? interpret("filter (fun row -> sum row > 100) [[1, 2], [3, 4], [5, 6]]"),
+    Ok("[]"),
+  )
+  assert_eq(
     try? interpret("zip (fun x -> fun y -> x + y) [1, 2, 3] [10, 20, 30]"),
     Ok("[11 22 33]"),
   )

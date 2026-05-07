@@ -5,6 +5,7 @@ fn default_env() -> Env {
   |> bind_builtin("iota", 1)
   |> bind_builtin("map", 2)
   |> bind_builtin("each", 2)
+  |> bind_builtin("filter", 2)
   |> bind_builtin("zip", 3)
   |> bind_builtin("reduce", 3)
   |> bind_builtin("scan", 3)
@@ -293,6 +294,7 @@ fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
   match name {
     "range" | "iota" => builtin_range(args[0])
     "map" | "each" => builtin_map(args[0], args[1])
+    "filter" => builtin_filter(args[0], args[1])
     "zip" => builtin_zip(args[0], args[1], args[2])
     "reduce" => builtin_reduce(args[0], args[1], args[2])
     "scan" => builtin_scan(args[0], args[1], args[2])
@@ -355,6 +357,24 @@ fn builtin_map(fn_value : Value, arg : Value) -> Value raise UiuaMLError {
       array_from_items(mapped)
     }
     _ => apply(fn_value, arg)
+  }
+}
+
+///|
+fn builtin_filter(fn_value : Value, arg : Value) -> Value raise UiuaMLError {
+  match arg {
+    Value::Array(array) => {
+      let selected = Array::new(capacity=array.row_count())
+      let mut row = 0
+      while row < array.row_count() {
+        if truthy(apply(fn_value, array.row_value(row))) {
+          selected.push(row)
+        }
+        row = row + 1
+      }
+      Value::Array(array.select_rows(selected))
+    }
+    _ => fail("filter expects an array")
   }
 }
 
