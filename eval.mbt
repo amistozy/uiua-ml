@@ -14,6 +14,9 @@ fn default_env() -> Env {
   |> bind_builtin("reshape", 2)
   |> bind_builtin("take", 2)
   |> bind_builtin("drop", 2)
+  |> bind_builtin("pick", 2)
+  |> bind_builtin("select", 2)
+  |> bind_builtin("rotate", 2)
   |> bind_builtin("transpose", 1)
   |> bind_builtin("append", 2)
 }
@@ -291,6 +294,9 @@ fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
     "reshape" => builtin_reshape(args[0], args[1])
     "take" => builtin_take(args[0], args[1])
     "drop" => builtin_drop(args[0], args[1])
+    "pick" => builtin_pick(args[0], args[1])
+    "select" => builtin_select(args[0], args[1])
+    "rotate" => builtin_rotate(args[0], args[1])
     "transpose" => builtin_transpose(args[0])
     "append" => builtin_append(args[0], args[1])
     _ => fail("Unknown builtin: \{name}")
@@ -416,6 +422,30 @@ fn builtin_drop(amount : Value, arg : Value) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => Value::Array(array.drop_rows(n))
     _ => fail("drop expects an array")
+  }
+}
+
+///|
+fn builtin_pick(index : Value, arg : Value) -> Value raise UiuaMLError {
+  let indices = as_index_vector(index, "pick")
+  pick_from(arg, indices)
+}
+
+///|
+fn builtin_select(indices : Value, arg : Value) -> Value raise UiuaMLError {
+  let rows = as_index_vector(indices, "select")
+  match arg {
+    Value::Array(array) => Value::Array(array.select_rows(rows))
+    _ => fail("select expects an array")
+  }
+}
+
+///|
+fn builtin_rotate(amount : Value, arg : Value) -> Value raise UiuaMLError {
+  let n = as_int(amount)
+  match arg {
+    Value::Array(array) => Value::Array(array.rotated_rows(n))
+    _ => fail("rotate expects an array")
   }
 }
 

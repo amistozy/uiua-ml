@@ -229,6 +229,18 @@ fn UiArray::row_value(self : UiArray, row : Int) -> Value {
 }
 
 ///|
+fn UiArray::checked_row_value(
+  self : UiArray,
+  row : Int,
+  name : String,
+) -> Value raise UiuaMLError {
+  guard row >= 0 && row < self.row_count() else {
+    fail("\{name} index \{row} is out of bounds for \{self.row_count()} rows")
+  }
+  self.row_value(row)
+}
+
+///|
 fn UiArray::reversed(self : UiArray) -> UiArray {
   if self.rank() <= 1 {
     return { shape: self.shape, data: self.data.rev() }
@@ -271,6 +283,41 @@ fn UiArray::append_rows(
   }
   validate_shape(shape, data.length())
   { shape, data }
+}
+
+///|
+fn UiArray::rotated_rows(self : UiArray, n : Int) -> UiArray {
+  if self.rank() == 0 || self.row_count() == 0 {
+    return self
+  }
+  let rows = self.row_count()
+  let offset = (n % rows + rows) % rows
+  if offset == 0 {
+    return self
+  }
+  let row_len = self.row_len()
+  let data = Array::new(capacity=self.element_count())
+  let mut row = offset
+  while row < rows {
+    let start = row * row_len
+    let mut i = 0
+    while i < row_len {
+      data.push(self.data[start + i])
+      i = i + 1
+    }
+    row = row + 1
+  }
+  row = 0
+  while row < offset {
+    let start = row * row_len
+    let mut i = 0
+    while i < row_len {
+      data.push(self.data[start + i])
+      i = i + 1
+    }
+    row = row + 1
+  }
+  { shape: self.shape, data }
 }
 
 ///|
@@ -327,6 +374,28 @@ fn UiArray::slice_rows(
     next[0] = end_row - start_row
     next
   }
+  { shape, data }
+}
+
+///|
+fn UiArray::select_rows(
+  self : UiArray,
+  indices : Array[Int],
+) -> UiArray raise UiuaMLError {
+  let row_shape = self.row_shape()
+  let row_len = self.row_len()
+  let data = Array::new(capacity=indices.length() * row_len)
+  for index in indices {
+    let row = self.checked_row_value(index, "select")
+    for item in flat_values(row) {
+      data.push(item)
+    }
+  }
+  let shape = [indices.length()]
+  for dim in row_shape {
+    shape.push(dim)
+  }
+  validate_shape(shape, data.length())
   { shape, data }
 }
 
@@ -407,6 +476,41 @@ fn as_int(value : Value) -> Int raise UiuaMLError {
       i
     }
     _ => fail("Expected a number, got \{value.render()}")
+  }
+}
+
+///|
+fn as_index_vector(
+  value : Value,
+  name : String,
+) -> Array[Int] raise UiuaMLError {
+  match value {
+    Value::Num(_) => [as_int(value)]
+    Value::Array(array) => {
+      guard array.rank() <= 1 else {
+        fail("\{name} expects an integer or a vector of integers")
+      }
+      let indices = Array::new(capacity=array.element_count())
+      for item in array.data {
+        indices.push(as_int(item))
+      }
+      indices
+    }
+    _ => fail("\{name} expects an integer or a vector of integers")
+  }
+}
+
+///|
+fn pick_from(value : Value, indices : Array[Int]) -> Value raise UiuaMLError {
+  if indices.is_empty() {
+    return value
+  }
+  match value {
+    Value::Array(array) => {
+      let row = array.checked_row_value(indices[0], "pick")
+      pick_from(row, indices[1:].to_owned())
+    }
+    _ => fail("Cannot pick deeper into a scalar value")
   }
 }
 
