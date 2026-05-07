@@ -62,7 +62,7 @@ test "pick and select use row-major indexing" {
     Value::Num(5.0),
     Value::Num(6.0),
   ])
-  assert_eq(pick_from(array, [1, 2]).render(), "6")
+  assert_eq(pick_from(array, [1, 2], None).render(), "6")
   guard array is Value::Array(arr) else { panic() }
   let selected = arr.select_rows([1, 0, 1])
   assert_eq(Value::Array(selected).render(), "[[4 5 6] [1 2 3] [4 5 6]]")

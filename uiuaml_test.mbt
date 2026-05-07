@@ -156,6 +156,49 @@ test "conditionals and comparisons" {
 }
 
 ///|
+test "fill semantics for structural operations" {
+  assert_eq(try? interpret("fill 0 in take 5 [1, 2, 3]"), Ok("[1 2 3 0 0]"))
+  assert_eq(
+    try? interpret("fill [9, 9] in take 4 [[1, 2], [3, 4]]"),
+    Ok("[[1 2] [3 4] [9 9] [9 9]]"),
+  )
+  assert_eq(try? interpret("fill 0 in drop 2 [1, 2, 3, 4]"), Ok("[3 4 0 0]"))
+  assert_eq(
+    try? interpret("fill 0 in rotate 2 [1, 2, 3, 4, 5]"),
+    Ok("[3 4 5 0 0]"),
+  )
+  assert_eq(try? interpret("fill 0 in pick 9 [3, 8, 4, 1]"), Ok("0"))
+  assert_eq(
+    try? interpret("fill [9, 9] in select [0, 9, -1] [[1, 2], [3, 4]]"),
+    Ok("[[1 2] [9 9] [9 9]]"),
+  )
+  assert_eq(
+    try? interpret("fill 0 in reshape [2, 3] [1, 2, 3, 4]"),
+    Ok("[[1 2 3] [4 0 0]]"),
+  )
+  assert_eq(
+    try? interpret("fill 0 in windows 3 [1, 2, 3]"),
+    Ok("[[0 0 1] [0 1 2] [1 2 3] [2 3 0] [3 0 0]]"),
+  )
+}
+
+///|
+test "shape and index errors are more explicit" {
+  let shape_error = try interpret("[1, 2] + [1, 2, 3]") catch {
+    err => err.to_string()
+  } noraise {
+    value => "unexpected ok: \{value}"
+  }
+  assert_eq(shape_error, "pervasive operation shape mismatch: [2] vs [3]")
+  let index_error = try interpret("pick 9 [1, 2]") catch {
+    err => err.to_string()
+  } noraise {
+    value => "unexpected ok: \{value}"
+  }
+  assert_eq(index_error, "pick index 9 is out of bounds for 2 rows")
+}
+
+///|
 test "comments are ignored" {
   let program =
     #|let xs = range 4 # array source

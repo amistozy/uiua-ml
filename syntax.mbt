@@ -4,6 +4,7 @@ priv enum TokenKind {
   Ident
   True
   False
+  Fill
   Let
   In
   Fun
@@ -143,6 +144,7 @@ fn keyword_or_ident(lexeme : String) -> TokenKind {
     "let" => TokenKind::Let
     "in" => TokenKind::In
     "fun" => TokenKind::Fun
+    "fill" => TokenKind::Fill
     "if" => TokenKind::If
     "then" => TokenKind::Then
     "else" => TokenKind::Else
@@ -158,6 +160,7 @@ priv enum Expr {
   Bool(Bool)
   Var(String)
   ArrayLit(Array[Expr])
+  Fill(Expr, Expr)
   Let(String, Expr, Expr)
   If(Expr, Expr, Expr)
   Fun(String, Expr)
@@ -217,6 +220,7 @@ fn token_kind_name(kind : TokenKind) -> String {
     Ident => "identifier"
     True => "true"
     False => "false"
+    Fill => "fill"
     Let => "let"
     In => "in"
     Fun => "fun"
@@ -249,6 +253,9 @@ fn Parser::parse_expr(self : Parser) -> Expr raise UiuaMLError {
   if self.eat(TokenKind::Let) {
     return self.parse_let()
   }
+  if self.eat(TokenKind::Fill) {
+    return self.parse_fill()
+  }
   if self.eat(TokenKind::If) {
     return self.parse_if()
   }
@@ -256,6 +263,13 @@ fn Parser::parse_expr(self : Parser) -> Expr raise UiuaMLError {
     return self.parse_fun()
   }
   self.parse_comparison()
+}
+
+///|
+fn Parser::parse_fill(self : Parser) -> Expr raise UiuaMLError {
+  let fill_value = self.parse_comparison()
+  ignore(self.expect(TokenKind::In))
+  Expr::Fill(fill_value, self.parse_expr())
 }
 
 ///|
@@ -357,6 +371,7 @@ fn starts_expr(kind : TokenKind) -> Bool {
     | LBracket
     | If
     | Fun
+    | Fill
     | Let
     | Minus => true
     _ => false

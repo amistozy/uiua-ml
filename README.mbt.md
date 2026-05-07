@@ -13,6 +13,7 @@ operators.
 
 UiuaML currently supports:
 
+- `fill ... in ...` scoped fill values for structural array operations
 - `let ... in ...` bindings
 - `fun x -> ...` anonymous functions
 - function application
@@ -37,6 +38,7 @@ UiuaML currently supports:
 let inc = fun x -> x + 1 in inc 41
 let add = fun x -> fun y -> x + y in add 3 4
 if sum [1, 1, 1] == 3 then 42 else 0
+fill 0 in take 6 [1, 2, 3]
 ```
 
 ### Arrays and broadcasting
@@ -174,6 +176,17 @@ drop -2 [1, 2, 3, 4, 5]
 rotate -1 [[1, 2], [3, 4], [5, 6]]
 ```
 
+### Fill scopes
+
+`fill value in expr` installs a temporary fill value for structural operations
+inside `expr`.
+
+```text
+fill 0 in take 5 [1, 2, 3]
+fill [9, 9] in select [0, 9, -1] [[1, 2], [3, 4]]
+fill 0 in reshape [2, 3] [1, 2, 3, 4]
+```
+
 ## CLI
 
 The command line interface lives in `cmd/main` and uses
@@ -246,7 +259,6 @@ full Uiua language, and several larger features are still out of scope, such as:
 
 - boxes and heterogeneous arrays
 - modifiers and tacit stack syntax
-- fill semantics for structural operations
 - inversion and under-style transformations
 - modules and larger source-file language features
 

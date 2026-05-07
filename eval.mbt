@@ -41,6 +41,15 @@ fn bind_builtin(env : Env, name : String, arity : Int) -> Env {
 
 ///|
 fn eval(expr : Expr, env : Env) -> Value raise UiuaMLError {
+  eval_with_fill(expr, env, None)
+}
+
+///|
+fn eval_with_fill(
+  expr : Expr,
+  env : Env,
+  fill : Value?,
+) -> Value raise UiuaMLError {
   match expr {
     Expr::Number(n) => Value::Num(n)
     Expr::Bool(b) => Value::Bool(b)
@@ -52,25 +61,38 @@ fn eval(expr : Expr, env : Env) -> Value raise UiuaMLError {
     Expr::ArrayLit(items) => {
       let values = Array::new(capacity=items.length())
       for item in items {
-        values.push(eval(item, env))
+        values.push(eval_with_fill(item, env, fill))
       }
       array_from_items(values)
     }
     Expr::Let(name, value_expr, body) => {
-      let next_env = env.add(name, eval(value_expr, env))
-      eval(body, next_env)
+      let next_env = env.add(name, eval_with_fill(value_expr, env, fill))
+      eval_with_fill(body, next_env, fill)
+    }
+    Expr::Fill(fill_expr, body) => {
+      let fill_value = eval_with_fill(fill_expr, env, fill)
+      eval_with_fill(body, env, Some(fill_value))
     }
     Expr::If(cond, on_true, on_false) =>
-      if truthy(eval(cond, env)) {
-        eval(on_true, env)
+      if truthy(eval_with_fill(cond, env, fill)) {
+        eval_with_fill(on_true, env, fill)
       } else {
-        eval(on_false, env)
+        eval_with_fill(on_false, env, fill)
       }
     Expr::Fun(param, body) => Value::Closure({ param, body, env })
-    Expr::Call(callee, arg) => apply(eval(callee, env), eval(arg, env))
-    Expr::Unary(op, inner) => eval_unary(op, eval(inner, env))
+    Expr::Call(callee, arg) =>
+      apply(
+        eval_with_fill(callee, env, fill),
+        eval_with_fill(arg, env, fill),
+        fill,
+      )
+    Expr::Unary(op, inner) => eval_unary(op, eval_with_fill(inner, env, fill))
     Expr::Binary(op, lhs, rhs) =>
-      eval_binary(op, eval(lhs, env), eval(rhs, env))
+      eval_binary(
+        op,
+        eval_with_fill(lhs, env, fill),
+        eval_with_fill(rhs, env, fill),
+      )
   }
 }
 
@@ -85,17 +107,21 @@ fn truthy(value : Value) -> Bool {
 }
 
 ///|
-fn apply(fn_value : Value, arg : Value) -> Value raise UiuaMLError {
+fn apply(
+  fn_value : Value,
+  arg : Value,
+  fill : Value?,
+) -> Value raise UiuaMLError {
   match fn_value {
     Value::Closure(closure) => {
       let next_env = closure.env.add(closure.param, arg)
-      eval(closure.body, next_env)
+      eval_with_fill(closure.body, next_env, fill)
     }
     Value::Builtin(name, arity, captured) => {
       let args = captured.copy()
       args.push(arg)
       if args.length() == arity {
-        run_builtin(name, args)
+        run_builtin(name, args, fill)
       } else {
         Value::Builtin(name, arity, args)
       }
@@ -287,20 +313,22 @@ fn pervade_arrays(
     }
     return Value::Array(UiArray::{ shape: lhs.shape, data })
   }
-  fail(
-    "Shape mismatch: \{render_shape(lhs.shape)} vs \{render_shape(rhs.shape)}",
-  )
+  fail_shape_mismatch("pervasive operation", lhs.shape, rhs.shape)
 }
 
 ///|
-fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
+fn run_builtin(
+  name : String,
+  args : Array[Value],
+  fill : Value?,
+) -> Value raise UiuaMLError {
   match name {
     "range" | "iota" => builtin_range(args[0])
-    "map" | "each" => builtin_map(args[0], args[1])
-    "filter" => builtin_filter(args[0], args[1])
-    "zip" => builtin_zip(args[0], args[1], args[2])
-    "reduce" => builtin_reduce(args[0], args[1], args[2])
-    "scan" => builtin_scan(args[0], args[1], args[2])
+    "map" | "each" => builtin_map(args[0], args[1], fill)
+    "filter" => builtin_filter(args[0], args[1], fill)
+    "zip" => builtin_zip(args[0], args[1], args[2], fill)
+    "reduce" => builtin_reduce(args[0], args[1], args[2], fill)
+    "scan" => builtin_scan(args[0], args[1], args[2], fill)
     "shape" => builtin_shape(args[0])
     "rank" => builtin_rank(args[0])
     "sum" => Value::Num(sum_numbers(args[0]))
@@ -313,15 +341,15 @@ fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
     "reverse" => builtin_reverse(args[0])
     "deshape" => builtin_deshape(args[0])
     "len" => builtin_len(args[0])
-    "reshape" => builtin_reshape(args[0], args[1])
-    "take" => builtin_take(args[0], args[1])
-    "drop" => builtin_drop(args[0], args[1])
-    "pick" => builtin_pick(args[0], args[1])
-    "select" => builtin_select(args[0], args[1])
+    "reshape" => builtin_reshape(args[0], args[1], fill)
+    "take" => builtin_take(args[0], args[1], fill)
+    "drop" => builtin_drop(args[0], args[1], fill)
+    "pick" => builtin_pick(args[0], args[1], fill)
+    "select" => builtin_select(args[0], args[1], fill)
     "keep" => builtin_keep(args[0], args[1])
-    "windows" => builtin_windows(args[0], args[1])
+    "windows" => builtin_windows(args[0], args[1], fill)
     "orient" => builtin_orient(args[0], args[1])
-    "rotate" => builtin_rotate(args[0], args[1])
+    "rotate" => builtin_rotate(args[0], args[1], fill)
     "transpose" => builtin_transpose(args[0])
     "append" => builtin_append(args[0], args[1])
     _ => fail("Unknown builtin: \{name}")
@@ -351,29 +379,37 @@ fn builtin_shape(arg : Value) -> Value raise UiuaMLError {
 }
 
 ///|
-fn builtin_map(fn_value : Value, arg : Value) -> Value raise UiuaMLError {
+fn builtin_map(
+  fn_value : Value,
+  arg : Value,
+  fill : Value?,
+) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => {
       let mapped = Array::new(capacity=array.row_count())
       let mut row = 0
       while row < array.row_count() {
-        mapped.push(apply(fn_value, array.row_value(row)))
+        mapped.push(apply(fn_value, array.row_value(row), fill))
         row = row + 1
       }
       array_from_items(mapped)
     }
-    _ => apply(fn_value, arg)
+    _ => apply(fn_value, arg, fill)
   }
 }
 
 ///|
-fn builtin_filter(fn_value : Value, arg : Value) -> Value raise UiuaMLError {
+fn builtin_filter(
+  fn_value : Value,
+  arg : Value,
+  fill : Value?,
+) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => {
       let selected = Array::new(capacity=array.row_count())
       let mut row = 0
       while row < array.row_count() {
-        if truthy(apply(fn_value, array.row_value(row))) {
+        if truthy(apply(fn_value, array.row_value(row), fill)) {
           selected.push(row)
         }
         row = row + 1
@@ -389,8 +425,9 @@ fn apply_binary_fn(
   fn_value : Value,
   lhs : Value,
   rhs : Value,
+  fill : Value?,
 ) -> Value raise UiuaMLError {
-  apply(apply(fn_value, lhs), rhs)
+  apply(apply(fn_value, lhs, fill), rhs, fill)
 }
 
 ///|
@@ -398,6 +435,7 @@ fn builtin_zip(
   fn_value : Value,
   lhs : Value,
   rhs : Value,
+  fill : Value?,
 ) -> Value raise UiuaMLError {
   match (lhs, rhs) {
     (Value::Array(xs), Value::Array(ys)) =>
@@ -406,7 +444,12 @@ fn builtin_zip(
         let mut row = 0
         while row < xs.row_count() {
           zipped.push(
-            apply_binary_fn(fn_value, xs.row_value(row), ys.row_value(row)),
+            apply_binary_fn(
+              fn_value,
+              xs.row_value(row),
+              ys.row_value(row),
+              fill,
+            ),
           )
           row = row + 1
         }
@@ -416,7 +459,7 @@ fn builtin_zip(
         let zipped = Array::new(capacity=ys.row_count())
         let mut row = 0
         while row < ys.row_count() {
-          zipped.push(apply_binary_fn(fn_value, left, ys.row_value(row)))
+          zipped.push(apply_binary_fn(fn_value, left, ys.row_value(row), fill))
           row = row + 1
         }
         array_from_items(zipped)
@@ -425,7 +468,7 @@ fn builtin_zip(
         let zipped = Array::new(capacity=xs.row_count())
         let mut row = 0
         while row < xs.row_count() {
-          zipped.push(apply_binary_fn(fn_value, xs.row_value(row), right))
+          zipped.push(apply_binary_fn(fn_value, xs.row_value(row), right, fill))
           row = row + 1
         }
         array_from_items(zipped)
@@ -438,7 +481,7 @@ fn builtin_zip(
       let zipped = Array::new(capacity=xs.row_count())
       let mut row = 0
       while row < xs.row_count() {
-        zipped.push(apply_binary_fn(fn_value, xs.row_value(row), scalar))
+        zipped.push(apply_binary_fn(fn_value, xs.row_value(row), scalar, fill))
         row = row + 1
       }
       array_from_items(zipped)
@@ -447,12 +490,12 @@ fn builtin_zip(
       let zipped = Array::new(capacity=ys.row_count())
       let mut row = 0
       while row < ys.row_count() {
-        zipped.push(apply_binary_fn(fn_value, scalar, ys.row_value(row)))
+        zipped.push(apply_binary_fn(fn_value, scalar, ys.row_value(row), fill))
         row = row + 1
       }
       array_from_items(zipped)
     }
-    _ => apply_binary_fn(fn_value, lhs, rhs)
+    _ => apply_binary_fn(fn_value, lhs, rhs, fill)
   }
 }
 
@@ -461,18 +504,19 @@ fn builtin_reduce(
   fn_value : Value,
   init : Value,
   arg : Value,
+  fill : Value?,
 ) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => {
       let mut acc = init
       let mut row = 0
       while row < array.row_count() {
-        acc = apply(apply(fn_value, acc), array.row_value(row))
+        acc = apply(apply(fn_value, acc, fill), array.row_value(row), fill)
         row = row + 1
       }
       acc
     }
-    _ => apply(apply(fn_value, init), arg)
+    _ => apply(apply(fn_value, init, fill), arg, fill)
   }
 }
 
@@ -481,6 +525,7 @@ fn builtin_scan(
   fn_value : Value,
   init : Value,
   arg : Value,
+  fill : Value?,
 ) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => {
@@ -491,13 +536,13 @@ fn builtin_scan(
       let mut acc = init
       let mut row = 0
       while row < array.row_count() {
-        acc = apply(apply(fn_value, acc), array.row_value(row))
+        acc = apply(apply(fn_value, acc, fill), array.row_value(row), fill)
         scanned.push(acc)
         row = row + 1
       }
       array_from_items(scanned)
     }
-    _ => apply(apply(fn_value, init), arg)
+    _ => apply(apply(fn_value, init, fill), arg, fill)
   }
 }
 
@@ -642,6 +687,7 @@ fn builtin_append(lhs : Value, rhs : Value) -> Value raise UiuaMLError {
 fn builtin_reshape(
   shape_value : Value,
   data_value : Value,
+  fill : Value?,
 ) -> Value raise UiuaMLError {
   let shape = shape_to_dims(shape_value)
   let flat = flat_values(data_value)
@@ -652,42 +698,96 @@ fn builtin_reshape(
   }
   let data = Array::new(capacity=count)
   let mut i = 0
-  while i < count {
-    data.push(flat[i % flat.length()])
+  while i < count.min(flat.length()) {
+    data.push(flat[i])
     i = i + 1
+  }
+  if count > flat.length() {
+    guard fill is Some(fill_value) else {
+      let mut j = i
+      while j < count {
+        data.push(flat[j % flat.length()])
+        j = j + 1
+      }
+      return make_array(shape, data)
+    }
+    let fill_scalar = expect_fill_scalar(fill_value, "reshape")
+    let mut j = i
+    while j < count {
+      data.push(fill_scalar)
+      j = j + 1
+    }
+  } else if fill is Some(_) && count < flat.length() {
+    fail(
+      "reshape with fill cannot shrink \{flat.length()} items into shape \{render_shape(shape)}",
+    )
   }
   make_array(shape, data)
 }
 
 ///|
-fn builtin_take(amount : Value, arg : Value) -> Value raise UiuaMLError {
+fn builtin_take(
+  amount : Value,
+  arg : Value,
+  fill : Value?,
+) -> Value raise UiuaMLError {
   let n = as_int(amount)
   match arg {
-    Value::Array(array) => Value::Array(array.take_rows(n))
+    Value::Array(array) => {
+      let next = match fill {
+        Some(fill_value) => array.take_rows_filled(n, fill_value)
+        None => array.take_rows(n)
+      }
+      Value::Array(next)
+    }
     _ => fail("take expects an array")
   }
 }
 
 ///|
-fn builtin_drop(amount : Value, arg : Value) -> Value raise UiuaMLError {
+fn builtin_drop(
+  amount : Value,
+  arg : Value,
+  fill : Value?,
+) -> Value raise UiuaMLError {
   let n = as_int(amount)
   match arg {
-    Value::Array(array) => Value::Array(array.drop_rows(n))
+    Value::Array(array) => {
+      let next = match fill {
+        Some(fill_value) => array.drop_rows_filled(n, fill_value)
+        None => array.drop_rows(n)
+      }
+      Value::Array(next)
+    }
     _ => fail("drop expects an array")
   }
 }
 
 ///|
-fn builtin_pick(index : Value, arg : Value) -> Value raise UiuaMLError {
+fn builtin_pick(
+  index : Value,
+  arg : Value,
+  fill : Value?,
+) -> Value raise UiuaMLError {
   let indices = as_index_vector(index, "pick")
-  pick_from(arg, indices)
+  pick_from(arg, indices, fill)
 }
 
 ///|
-fn builtin_select(indices : Value, arg : Value) -> Value raise UiuaMLError {
+fn builtin_select(
+  indices : Value,
+  arg : Value,
+  fill : Value?,
+) -> Value raise UiuaMLError {
   let rows = as_index_vector(indices, "select")
   match arg {
-    Value::Array(array) => Value::Array(array.select_rows(rows))
+    Value::Array(array) => {
+      let next = match fill {
+        Some(fill_value) => array.select_rows_filled(rows, fill_value)
+        None => array.select_rows(rows)
+      }
+      Value::Array(next)
+    }
     _ => fail("select expects an array")
   }
 }
@@ -717,10 +817,20 @@ fn builtin_keep(mask : Value, arg : Value) -> Value raise UiuaMLError {
 }
 
 ///|
-fn builtin_windows(size : Value, arg : Value) -> Value raise UiuaMLError {
+fn builtin_windows(
+  size : Value,
+  arg : Value,
+  fill : Value?,
+) -> Value raise UiuaMLError {
   let n = as_int(size)
   match arg {
-    Value::Array(array) => Value::Array(array.window_rows(n))
+    Value::Array(array) => {
+      let next = match fill {
+        Some(fill_value) => array.window_rows_filled(n, fill_value)
+        None => array.window_rows(n)
+      }
+      Value::Array(next)
+    }
     _ => fail("windows expects an array")
   }
 }
@@ -735,10 +845,20 @@ fn builtin_orient(axes : Value, arg : Value) -> Value raise UiuaMLError {
 }
 
 ///|
-fn builtin_rotate(amount : Value, arg : Value) -> Value raise UiuaMLError {
+fn builtin_rotate(
+  amount : Value,
+  arg : Value,
+  fill : Value?,
+) -> Value raise UiuaMLError {
   let n = as_int(amount)
   match arg {
-    Value::Array(array) => Value::Array(array.rotated_rows(n))
+    Value::Array(array) => {
+      let next = match fill {
+        Some(fill_value) => array.rotated_rows_filled(n, fill_value)
+        None => array.rotated_rows(n)
+      }
+      Value::Array(next)
+    }
     _ => fail("rotate expects an array")
   }
 }

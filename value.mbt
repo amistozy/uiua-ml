@@ -50,6 +50,17 @@ fn render_shape(shape : Array[Int]) -> String {
 }
 
 ///|
+fn[T] fail_shape_mismatch(
+  op : String,
+  lhs_shape : Array[Int],
+  rhs_shape : Array[Int],
+) -> T raise UiuaMLError {
+  fail(
+    "\{op} shape mismatch: \{render_shape(lhs_shape)} vs \{render_shape(rhs_shape)}",
+  )
+}
+
+///|
 fn deep_equal(lhs : Value, rhs : Value) -> Bool raise UiuaMLError {
   match (lhs, rhs) {
     (Value::Num(a), Value::Num(b)) => a == b
@@ -313,9 +324,7 @@ fn UiArray::append_rows(
   other : UiArray,
 ) -> UiArray raise UiuaMLError {
   guard self.row_shape() == other.row_shape() else {
-    fail(
-      "append expects matching row shapes: \{render_shape(self.row_shape())} vs \{render_shape(other.row_shape())}",
-    )
+    fail_shape_mismatch("append row", self.row_shape(), other.row_shape())
   }
   let data = self.data.copy()
   for item in other.data {
@@ -444,6 +453,36 @@ fn UiArray::select_rows(
 }
 
 ///|
+fn UiArray::select_rows_filled(
+  self : UiArray,
+  indices : Array[Int],
+  fill : Value,
+) -> UiArray raise UiuaMLError {
+  let row_shape = self.row_shape()
+  let row_len = self.row_len()
+  let fill_row = fill_row_for_shape(row_shape, fill)
+  let data = Array::new(capacity=indices.length() * row_len)
+  for index in indices {
+    if index < 0 || index >= self.row_count() {
+      for item in fill_row {
+        data.push(item)
+      }
+    } else {
+      let row = self.row_value(index)
+      for item in flat_values(row) {
+        data.push(item)
+      }
+    }
+  }
+  let shape = [indices.length()]
+  for dim in row_shape {
+    shape.push(dim)
+  }
+  validate_shape(shape, data.length())
+  { shape, data }
+}
+
+///|
 fn UiArray::window_rows(
   self : UiArray,
   size : Int,
@@ -467,6 +506,57 @@ fn UiArray::window_rows(
   }
   let shape = [count, size]
   for dim in self.row_shape() {
+    shape.push(dim)
+  }
+  validate_shape(shape, data.length())
+  { shape, data }
+}
+
+///|
+fn UiArray::window_rows_filled(
+  self : UiArray,
+  size : Int,
+  fill : Value,
+) -> UiArray raise UiuaMLError {
+  guard self.rank() > 0 else { fail("windows cannot operate on a scalar") }
+  guard size > 0 else { fail("windows size must be positive") }
+  let row_shape = self.row_shape()
+  let row_len = self.row_len()
+  let fill_row = fill_row_for_shape(row_shape, fill)
+  let padding = size - 1
+  let padded = Array::new(capacity=(self.row_count() + padding * 2) * row_len)
+  let mut i = 0
+  while i < padding {
+    for item in fill_row {
+      padded.push(item)
+    }
+    i = i + 1
+  }
+  for item in self.data {
+    padded.push(item)
+  }
+  i = 0
+  while i < padding {
+    for item in fill_row {
+      padded.push(item)
+    }
+    i = i + 1
+  }
+  let count = self.row_count() + padding
+  let data = Array::new(capacity=count * size * row_len)
+  let mut start_row = 0
+  while start_row < count {
+    let start = start_row * row_len
+    let end = start + size * row_len
+    let mut j = start
+    while j < end {
+      data.push(padded[j])
+      j = j + 1
+    }
+    start_row = start_row + 1
+  }
+  let shape = [count, size]
+  for dim in row_shape {
     shape.push(dim)
   }
   validate_shape(shape, data.length())
@@ -551,6 +641,151 @@ fn UiArray::transposed(self : UiArray) -> UiArray {
 }
 
 ///|
+fn UiArray::take_rows_filled(
+  self : UiArray,
+  n : Int,
+  fill : Value,
+) -> UiArray raise UiuaMLError {
+  if self.rank() == 0 {
+    return if n == 0 { { shape: [0], data: [] } } else { self }
+  }
+  let rows = self.row_count()
+  let need = n.abs()
+  let row_shape = self.row_shape()
+  let row_len = self.row_len()
+  let fill_row = fill_row_for_shape(row_shape, fill)
+  if need <= rows {
+    return self.take_rows(n)
+  }
+  let missing = need - rows
+  let data = Array::new(capacity=need * row_len)
+  if n >= 0 {
+    for item in self.data {
+      data.push(item)
+    }
+    let mut i = 0
+    while i < missing {
+      for item in fill_row {
+        data.push(item)
+      }
+      i = i + 1
+    }
+  } else {
+    let mut i = 0
+    while i < missing {
+      for item in fill_row {
+        data.push(item)
+      }
+      i = i + 1
+    }
+    for item in self.data {
+      data.push(item)
+    }
+  }
+  let shape = [need]
+  for dim in row_shape {
+    shape.push(dim)
+  }
+  validate_shape(shape, data.length())
+  { shape, data }
+}
+
+///|
+fn UiArray::drop_rows_filled(
+  self : UiArray,
+  n : Int,
+  fill : Value,
+) -> UiArray raise UiuaMLError {
+  if self.rank() == 0 {
+    return if n == 0 { self } else { { shape: [0], data: [] } }
+  }
+  let rows = self.row_count()
+  let row_shape = self.row_shape()
+  let row_len = self.row_len()
+  let fill_row = fill_row_for_shape(row_shape, fill)
+  let count = n.abs().min(rows)
+  let kept = if n >= 0 {
+    self.slice_rows(count, rows)
+  } else {
+    self.slice_rows(0, rows - count)
+  }
+  let data = Array::new(capacity=rows * row_len)
+  if n >= 0 {
+    for item in kept.data {
+      data.push(item)
+    }
+    let mut i = 0
+    while i < count {
+      for item in fill_row {
+        data.push(item)
+      }
+      i = i + 1
+    }
+  } else {
+    let mut i = 0
+    while i < count {
+      for item in fill_row {
+        data.push(item)
+      }
+      i = i + 1
+    }
+    for item in kept.data {
+      data.push(item)
+    }
+  }
+  validate_shape(self.shape, data.length())
+  { shape: self.shape, data }
+}
+
+///|
+fn UiArray::rotated_rows_filled(
+  self : UiArray,
+  n : Int,
+  fill : Value,
+) -> UiArray raise UiuaMLError {
+  if self.rank() == 0 || self.row_count() == 0 {
+    return self
+  }
+  let rows = self.row_count()
+  let row_shape = self.row_shape()
+  let row_len = self.row_len()
+  let fill_row = fill_row_for_shape(row_shape, fill)
+  let count = n.abs().min(rows)
+  let data = Array::new(capacity=self.element_count())
+  if n >= 0 {
+    let start = count * row_len
+    let mut i = start
+    while i < self.element_count() {
+      data.push(self.data[i])
+      i = i + 1
+    }
+    let mut j = 0
+    while j < count {
+      for item in fill_row {
+        data.push(item)
+      }
+      j = j + 1
+    }
+  } else {
+    let mut j = 0
+    while j < count {
+      for item in fill_row {
+        data.push(item)
+      }
+      j = j + 1
+    }
+    let end = self.element_count() - count * row_len
+    let mut i = 0
+    while i < end {
+      data.push(self.data[i])
+      i = i + 1
+    }
+  }
+  validate_shape(self.shape, data.length())
+  { shape: self.shape, data }
+}
+
+///|
 fn flat_to_indices(shape : Array[Int], flat : Int) -> Array[Int] {
   if shape.is_empty() {
     return []
@@ -628,17 +863,107 @@ fn as_index_vector(
 }
 
 ///|
-fn pick_from(value : Value, indices : Array[Int]) -> Value raise UiuaMLError {
+fn pick_from(
+  value : Value,
+  indices : Array[Int],
+  fill : Value?,
+) -> Value raise UiuaMLError {
   if indices.is_empty() {
     return value
   }
   match value {
     Value::Array(array) => {
-      let row = array.checked_row_value(indices[0], "pick")
-      pick_from(row, indices[1:].to_owned())
+      let index = indices[0]
+      if fill is Some(fill_value) && index < 0 {
+        return fill_value_for_pick(array, indices.length() - 1, fill_value)
+      }
+      let normalized = if index < 0 {
+        let next = array.row_count() + index
+        guard next >= 0 else {
+          if fill is Some(fill_value) {
+            return fill_value_for_pick(array, indices.length() - 1, fill_value)
+          }
+          fail(
+            "pick index \{index} is out of bounds for \{array.row_count()} rows",
+          )
+        }
+        next
+      } else {
+        index
+      }
+      if normalized >= array.row_count() {
+        if fill is Some(fill_value) {
+          return fill_value_for_pick(array, indices.length() - 1, fill_value)
+        }
+        fail(
+          "pick index \{index} is out of bounds for \{array.row_count()} rows",
+        )
+      }
+      let row = array.row_value(normalized)
+      pick_from(row, indices[1:].to_owned(), fill)
     }
     _ => fail("Cannot pick deeper into a scalar value")
   }
+}
+
+///|
+fn fill_value_for_pick(
+  array : UiArray,
+  remaining_depth : Int,
+  fill : Value,
+) -> Value raise UiuaMLError {
+  let target_shape = if remaining_depth + 1 >= array.rank() {
+    []
+  } else {
+    array.shape[remaining_depth + 1:].to_owned()
+  }
+  fill_value_for_shape(target_shape, fill, "pick")
+}
+
+///|
+fn fill_row_for_shape(
+  shape : Array[Int],
+  fill : Value,
+) -> Array[Value] raise UiuaMLError {
+  flat_values(fill_value_for_shape(shape, fill, "fill"))
+}
+
+///|
+fn fill_value_for_shape(
+  shape : Array[Int],
+  fill : Value,
+  op : String,
+) -> Value raise UiuaMLError {
+  let fill_shape = infer_shape(fill)
+  if fill_shape == shape {
+    return fill
+  }
+  if fill_shape.is_empty() {
+    if shape.is_empty() {
+      return fill
+    }
+    let count = element_count_for_shape(shape)
+    let data = Array::new(capacity=count)
+    let mut i = 0
+    while i < count {
+      data.push(fill)
+      i = i + 1
+    }
+    return make_array(shape, data)
+  }
+  fail(
+    "\{op} fill shape mismatch: expected \{render_shape(shape)}, got \{render_shape(fill_shape)}",
+  )
+}
+
+///|
+fn expect_fill_scalar(fill : Value, op : String) -> Value raise UiuaMLError {
+  guard infer_shape(fill).is_empty() else {
+    fail(
+      "\{op} expects a scalar fill value, got \{render_shape(infer_shape(fill))}",
+    )
+  }
+  fill
 }
 
 ///|
