@@ -21,6 +21,7 @@ test "functions and lets" {
 test "arrays inspired by uiua" {
   assert_eq(try? interpret("range 5"), Ok("[0 1 2 3 4]"))
   assert_eq(try? interpret("sum [1, 2, 3, 4]"), Ok("10"))
+  assert_eq(try? interpret("where [0, 1, 0, 1, 1, 0, 0]"), Ok("[1 3 4]"))
   assert_eq(try? interpret("shape [[1, 2], [3, 4]]"), Ok("[2 2]"))
   assert_eq(try? interpret("rank [[1, 2], [3, 4]]"), Ok("2"))
   assert_eq(try? interpret("first [[1, 2], [3, 4]]"), Ok("[1 2]"))
@@ -47,6 +48,18 @@ test "arrays inspired by uiua" {
   assert_eq(
     try? interpret("keep ([1, 0, 1] == 1) [[1, 2], [3, 4], [5, 6]]"),
     Ok("[[1 2] [5 6]]"),
+  )
+  assert_eq(
+    try? interpret("select (where [0, 1, 0, 1]) [2, 8, 3, 9]"),
+    Ok("[8 9]"),
+  )
+  assert_eq(
+    try? interpret("windows 3 [1, 2, 3, 4, 5]"),
+    Ok("[[1 2 3] [2 3 4] [3 4 5]]"),
+  )
+  assert_eq(
+    try? interpret("windows 2 [[1, 2], [3, 4], [5, 6]]"),
+    Ok("[[[1 2] [3 4]] [[3 4] [5 6]]]"),
   )
   assert_eq(try? interpret("rotate 2 [1, 2, 3, 4, 5]"), Ok("[3 4 5 1 2]"))
   assert_eq(

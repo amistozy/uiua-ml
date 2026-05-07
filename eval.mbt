@@ -6,6 +6,7 @@ fn default_env() -> Env {
   |> bind_builtin("shape", 1)
   |> bind_builtin("rank", 1)
   |> bind_builtin("sum", 1)
+  |> bind_builtin("where", 1)
   |> bind_builtin("first", 1)
   |> bind_builtin("last", 1)
   |> bind_builtin("reverse", 1)
@@ -17,6 +18,7 @@ fn default_env() -> Env {
   |> bind_builtin("pick", 2)
   |> bind_builtin("select", 2)
   |> bind_builtin("keep", 2)
+  |> bind_builtin("windows", 2)
   |> bind_builtin("rotate", 2)
   |> bind_builtin("transpose", 1)
   |> bind_builtin("append", 2)
@@ -287,6 +289,7 @@ fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
     "shape" => builtin_shape(args[0])
     "rank" => builtin_rank(args[0])
     "sum" => Value::Num(sum_numbers(args[0]))
+    "where" => builtin_where(args[0])
     "first" => builtin_first(args[0])
     "last" => builtin_last(args[0])
     "reverse" => builtin_reverse(args[0])
@@ -298,6 +301,7 @@ fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
     "pick" => builtin_pick(args[0], args[1])
     "select" => builtin_select(args[0], args[1])
     "keep" => builtin_keep(args[0], args[1])
+    "windows" => builtin_windows(args[0], args[1])
     "rotate" => builtin_rotate(args[0], args[1])
     "transpose" => builtin_transpose(args[0])
     "append" => builtin_append(args[0], args[1])
@@ -330,6 +334,58 @@ fn builtin_shape(arg : Value) -> Value raise UiuaMLError {
 ///|
 fn builtin_rank(arg : Value) -> Value {
   Value::Num(Double::from_int(infer_shape(arg).length()))
+}
+
+///|
+fn builtin_where(arg : Value) -> Value raise UiuaMLError {
+  match arg {
+    Value::Bool(b) =>
+      if b {
+        make_array([1], [Value::Num(0.0)])
+      } else {
+        make_array([0], [])
+      }
+    Value::Num(n) =>
+      if n != 0.0 {
+        make_array([1], [Value::Num(0.0)])
+      } else {
+        make_array([0], [])
+      }
+    Value::Array(array) => {
+      let true_count = array.data.fold(init=0, (count, item) => {
+        if truthy(item) {
+          count + 1
+        } else {
+          count
+        }
+      })
+      if array.rank() <= 1 {
+        let data = Array::new(capacity=true_count)
+        let mut i = 0
+        while i < array.element_count() {
+          if truthy(array.data[i]) {
+            data.push(Value::Num(Double::from_int(i)))
+          }
+          i = i + 1
+        }
+        make_array([data.length()], data)
+      } else {
+        let rank = array.rank()
+        let data = Array::new(capacity=true_count * rank)
+        let mut flat = 0
+        while flat < array.element_count() {
+          if truthy(array.data[flat]) {
+            for index in flat_to_indices(array.shape, flat) {
+              data.push(Value::Num(Double::from_int(index)))
+            }
+          }
+          flat = flat + 1
+        }
+        make_array([true_count, rank], data)
+      }
+    }
+    _ => fail("where expects a boolean or numeric array")
+  }
 }
 
 ///|
@@ -463,6 +519,15 @@ fn builtin_keep(mask : Value, arg : Value) -> Value raise UiuaMLError {
       Value::Array(array.select_rows(selected))
     }
     _ => fail("keep expects an array")
+  }
+}
+
+///|
+fn builtin_windows(size : Value, arg : Value) -> Value raise UiuaMLError {
+  let n = as_int(size)
+  match arg {
+    Value::Array(array) => Value::Array(array.window_rows(n))
+    _ => fail("windows expects an array")
   }
 }
 

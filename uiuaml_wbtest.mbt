@@ -82,3 +82,38 @@ test "rotate shifts rows forward along the leading axis" {
   assert_eq(Value::Array(arr.rotated_rows(1)).render(), "[[3 4] [5 6] [1 2]]")
   assert_eq(Value::Array(arr.rotated_rows(-1)).render(), "[[5 6] [1 2] [3 4]]")
 }
+
+///|
+test "where returns coordinates for multidimensional masks" {
+  let mask = make_array([2, 3], [
+    Value::Bool(false),
+    Value::Bool(true),
+    Value::Bool(false),
+    Value::Bool(true),
+    Value::Bool(false),
+    Value::Bool(true),
+  ])
+  let result = builtin_where(mask)
+  assert_eq(result.render(), "[[0 1] [1 0] [1 2]]")
+}
+
+///|
+test "windows creates overlapping leading-axis slices" {
+  let array = make_array([4, 2], [
+    Value::Num(1.0),
+    Value::Num(2.0),
+    Value::Num(3.0),
+    Value::Num(4.0),
+    Value::Num(5.0),
+    Value::Num(6.0),
+    Value::Num(7.0),
+    Value::Num(8.0),
+  ])
+  guard array is Value::Array(arr) else { panic() }
+  let windows = arr.window_rows(3)
+  assert_eq(windows.shape, [2, 3, 2])
+  assert_eq(
+    Value::Array(windows).render(),
+    "[[[1 2] [3 4] [5 6]] [[3 4] [5 6] [7 8]]]",
+  )
+}

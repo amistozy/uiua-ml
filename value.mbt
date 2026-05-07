@@ -400,6 +400,36 @@ fn UiArray::select_rows(
 }
 
 ///|
+fn UiArray::window_rows(
+  self : UiArray,
+  size : Int,
+) -> UiArray raise UiuaMLError {
+  guard self.rank() > 0 else { fail("windows cannot operate on a scalar") }
+  guard size > 0 else { fail("windows size must be positive") }
+  let rows = self.row_count()
+  let count = if size > rows { 0 } else { rows - size + 1 }
+  let row_len = self.row_len()
+  let data = Array::new(capacity=count * size * row_len)
+  let mut start_row = 0
+  while start_row < count {
+    let start = start_row * row_len
+    let end = start + size * row_len
+    let mut i = start
+    while i < end {
+      data.push(self.data[i])
+      i = i + 1
+    }
+    start_row = start_row + 1
+  }
+  let shape = [count, size]
+  for dim in self.row_shape() {
+    shape.push(dim)
+  }
+  validate_shape(shape, data.length())
+  { shape, data }
+}
+
+///|
 fn UiArray::transposed(self : UiArray) -> UiArray {
   if self.rank() <= 1 {
     return self
