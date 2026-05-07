@@ -16,6 +16,7 @@ fn default_env() -> Env {
   |> bind_builtin("drop", 2)
   |> bind_builtin("pick", 2)
   |> bind_builtin("select", 2)
+  |> bind_builtin("keep", 2)
   |> bind_builtin("rotate", 2)
   |> bind_builtin("transpose", 1)
   |> bind_builtin("append", 2)
@@ -296,6 +297,7 @@ fn run_builtin(name : String, args : Array[Value]) -> Value raise UiuaMLError {
     "drop" => builtin_drop(args[0], args[1])
     "pick" => builtin_pick(args[0], args[1])
     "select" => builtin_select(args[0], args[1])
+    "keep" => builtin_keep(args[0], args[1])
     "rotate" => builtin_rotate(args[0], args[1])
     "transpose" => builtin_transpose(args[0])
     "append" => builtin_append(args[0], args[1])
@@ -441,6 +443,30 @@ fn builtin_select(indices : Value, arg : Value) -> Value raise UiuaMLError {
 }
 
 ///|
+fn builtin_keep(mask : Value, arg : Value) -> Value raise UiuaMLError {
+  let rows = keep_indices(mask)
+  match arg {
+    Value::Array(array) => {
+      guard rows.length() == array.row_count() else {
+        fail(
+          "keep mask length \{rows.length()} does not match \{array.row_count()} rows",
+        )
+      }
+      let selected = Array::new()
+      let mut i = 0
+      while i < rows.length() {
+        if rows[i] {
+          selected.push(i)
+        }
+        i = i + 1
+      }
+      Value::Array(array.select_rows(selected))
+    }
+    _ => fail("keep expects an array")
+  }
+}
+
+///|
 fn builtin_rotate(amount : Value, arg : Value) -> Value raise UiuaMLError {
   let n = as_int(amount)
   match arg {
@@ -454,5 +480,24 @@ fn builtin_transpose(arg : Value) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => Value::Array(array.transposed())
     _ => fail("transpose expects an array")
+  }
+}
+
+///|
+fn keep_indices(mask : Value) -> Array[Bool] raise UiuaMLError {
+  match mask {
+    Value::Bool(b) => [b]
+    Value::Num(n) => [n != 0.0]
+    Value::Array(array) => {
+      guard array.rank() <= 1 else {
+        fail("keep expects a boolean or numeric mask vector")
+      }
+      let result = Array::new(capacity=array.element_count())
+      for item in array.data {
+        result.push(truthy(item))
+      }
+      result
+    }
+    _ => fail("keep expects a boolean or numeric mask vector")
   }
 }

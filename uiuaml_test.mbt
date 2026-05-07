@@ -40,6 +40,14 @@ test "arrays inspired by uiua" {
     try? interpret("select [0, 2, 1, 1] [[1, 2], [3, 4], [5, 6]]"),
     Ok("[[1 2] [5 6] [3 4] [3 4]]"),
   )
+  assert_eq(
+    try? interpret("keep [0, 1, 0, 1, 1, 0, 0] [2, 8, 3, 9, 1, 7, 2]"),
+    Ok("[8 9 1]"),
+  )
+  assert_eq(
+    try? interpret("keep ([1, 0, 1] == 1) [[1, 2], [3, 4], [5, 6]]"),
+    Ok("[[1 2] [5 6]]"),
+  )
   assert_eq(try? interpret("rotate 2 [1, 2, 3, 4, 5]"), Ok("[3 4 5 1 2]"))
   assert_eq(
     try? interpret("rotate -1 [[1, 2], [3, 4], [5, 6]]"),
