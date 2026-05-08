@@ -11,10 +11,7 @@ test "pervasive arithmetic" {
 ///|
 test "functions and lets" {
   assert_eq(try? interpret("let inc = fun x -> x + 1 in inc 41"), Ok("42"))
-  assert_eq(
-    try? interpret("let add = fun x -> fun y -> x + y in add 3 4"),
-    Ok("7"),
-  )
+  assert_eq(try? interpret("let add = fun x y -> x + y in add 3 4"), Ok("7"))
   assert_eq(try? interpret("(fun x y -> x + y) 3 4"), Ok("7"))
   assert_eq(try? interpret("let add x y = x + y in add 3 4"), Ok("7"))
   assert_eq(try? interpret("let bias x y z = x + y + z in bias 1 2 3"), Ok("6"))
@@ -54,40 +51,62 @@ test "arrays inspired by uiua" {
     Ok("[]"),
   )
   assert_eq(
-    try? interpret("zip (fun x -> fun y -> x + y) [1, 2, 3] [10, 20, 30]"),
+    try? interpret("zip (fun x y -> x + y) [1, 2, 3] [10, 20, 30]"),
     Ok("[11 22 33]"),
   )
   assert_eq(
-    try? interpret("zip (fun x -> fun y -> x + y) [1, 2, 3] 10"),
+    try? interpret("zip (fun x y -> x + y) [1, 2, 3] 10"),
     Ok("[11 12 13]"),
   )
   assert_eq(
     try? interpret(
-      "zip (fun row -> fun bias -> row + bias) [[1, 2], [3, 4], [5, 6]] [[10, 20]]",
+      "zip (fun row bias -> row + bias) [[1, 2], [3, 4], [5, 6]] [[10, 20]]",
     ),
     Ok("[[11 22] [13 24] [15 26]]"),
   )
   assert_eq(
-    try? interpret("reduce (fun acc -> fun x -> acc + x) 0 [1, 2, 3, 4]"),
+    try? interpret("table (fun x y -> x + y) [1, 2, 3] [10, 20, 30]"),
+    Ok("[[11 21 31] [12 22 32] [13 23 33]]"),
+  )
+  assert_eq(
+    try? interpret("table (fun x y -> x + y) 10 [1, 2, 3]"),
+    Ok("[11 12 13]"),
+  )
+  assert_eq(
+    try? interpret("table (fun x y -> x + y) [1, 2, 3] 10"),
+    Ok("[11 12 13]"),
+  )
+  assert_eq(
+    try? interpret(
+      "table (fun row bias -> row + bias) [[1, 2], [3, 4]] [[10, 20], [30, 40]]",
+    ),
+    Ok("[[[11 22] [31 42]] [[13 24] [33 44]]]"),
+  )
+  assert_eq(
+    try? interpret("table (fun x y -> [x, y]) [1, 2] [10, 20, 30]"),
+    Ok("[[[1 10] [1 20] [1 30]] [[2 10] [2 20] [2 30]]]"),
+  )
+  assert_eq(
+    try? interpret("reduce (fun acc x -> acc + x) 0 [1, 2, 3, 4]"),
     Ok("10"),
   )
   assert_eq(
-    try? interpret("scan (fun acc -> fun x -> acc + x) 0 [1, 2, 3, 4]"),
+    try? interpret("scan (fun acc x -> acc + x) 0 [1, 2, 3, 4]"),
     Ok("[1 3 6 10]"),
   )
   assert_eq(
     try? interpret(
-      "reduce (fun acc -> fun row -> acc + sum row) 0 [[1, 2], [3, 4], [5, 6]]",
+      "reduce (fun acc row -> acc + sum row) 0 [[1, 2], [3, 4], [5, 6]]",
     ),
     Ok("21"),
   )
   assert_eq(
     try? interpret(
-      "scan (fun acc -> fun row -> acc + row) [0, 0] [[1, 2], [3, 4], [5, 6]]",
+      "scan (fun acc row -> acc + row) [0, 0] [[1, 2], [3, 4], [5, 6]]",
     ),
     Ok("[[1 2] [4 6] [9 12]]"),
   )
-  assert_eq(try? interpret("scan (fun acc -> fun x -> acc + x) 0 []"), Ok("[]"))
+  assert_eq(try? interpret("scan (fun acc x -> acc + x) 0 []"), Ok("[]"))
   assert_eq(try? interpret("sum [1, 2, 3, 4]"), Ok("10"))
   assert_eq(try? interpret("any [0, 0, 1, 0]"), Ok("true"))
   assert_eq(try? interpret("any []"), Ok("false"))

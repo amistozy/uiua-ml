@@ -5,6 +5,7 @@ fn default_env() -> Env {
   |> bind_builtin("iota", 1)
   |> bind_builtin("map", 2)
   |> bind_builtin("each", 2)
+  |> bind_builtin("table", 3)
   |> bind_builtin("filter", 2)
   |> bind_builtin("zip", 3)
   |> bind_builtin("reduce", 3)
@@ -331,6 +332,7 @@ fn run_builtin(
   match name {
     "range" | "iota" => builtin_range(args[0])
     "map" | "each" => builtin_map(args[0], args[1], fill, source)
+    "table" => builtin_table(args[0], args[1], args[2], fill, source)
     "filter" => builtin_filter(args[0], args[1], fill, source)
     "zip" => builtin_zip(args[0], args[1], args[2], fill, source)
     "reduce" => builtin_reduce(args[0], args[1], args[2], fill, source)
@@ -463,6 +465,98 @@ fn apply_binary_fn(
   source : StringView,
 ) -> Value raise UiuaMLError {
   apply(apply(fn_value, lhs, fill, source), rhs, fill, source)
+}
+
+///|
+fn table_row_count(value : Value) -> Int {
+  match value {
+    Value::Array(array) => array.row_count()
+    _ => 1
+  }
+}
+
+///|
+fn table_row_value(value : Value, row : Int) -> Value {
+  match value {
+    Value::Array(array) => array.row_value(row)
+    _ => value
+  }
+}
+
+///|
+fn builtin_table(
+  fn_value : Value,
+  lhs : Value,
+  rhs : Value,
+  fill : Value?,
+  source : StringView,
+) -> Value raise UiuaMLError {
+  let lhs_rows = table_row_count(lhs)
+  let rhs_rows = table_row_count(rhs)
+  if lhs_rows == 0 || rhs_rows == 0 {
+    return make_array([0], [])
+  }
+  if lhs_rows == 1 && rhs_rows == 1 {
+    return apply_binary_fn(
+      fn_value,
+      table_row_value(lhs, 0),
+      table_row_value(rhs, 0),
+      fill,
+      source,
+    )
+  }
+  if lhs_rows == 1 {
+    let left = table_row_value(lhs, 0)
+    let rows = Array::new(capacity=rhs_rows)
+    let mut row = 0
+    while row < rhs_rows {
+      rows.push(
+        apply_binary_fn(fn_value, left, table_row_value(rhs, row), fill, source),
+      )
+      row = row + 1
+    }
+    return array_from_items(rows)
+  }
+  if rhs_rows == 1 {
+    let right = table_row_value(rhs, 0)
+    let rows = Array::new(capacity=lhs_rows)
+    let mut row = 0
+    while row < lhs_rows {
+      rows.push(
+        apply_binary_fn(
+          fn_value,
+          table_row_value(lhs, row),
+          right,
+          fill,
+          source,
+        ),
+      )
+      row = row + 1
+    }
+    return array_from_items(rows)
+  }
+  let outer = Array::new(capacity=lhs_rows)
+  let mut left_row = 0
+  while left_row < lhs_rows {
+    let left = table_row_value(lhs, left_row)
+    let inner = Array::new(capacity=rhs_rows)
+    let mut right_row = 0
+    while right_row < rhs_rows {
+      inner.push(
+        apply_binary_fn(
+          fn_value,
+          left,
+          table_row_value(rhs, right_row),
+          fill,
+          source,
+        ),
+      )
+      right_row = right_row + 1
+    }
+    outer.push(array_from_items(inner))
+    left_row = left_row + 1
+  }
+  array_from_items(outer)
 }
 
 ///|

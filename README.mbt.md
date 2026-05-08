@@ -49,6 +49,7 @@ if sum [1, 1, 1] == 3 then 42 else 0
 ```text
 map (fun x -> x + 1) [1, 2, 3]
 filter (fun x -> x > 2) [1, 2, 3, 4, 5]
+table (fun x y -> x + y) [1, 2, 3] [10, 20, 30]
 zip (fun x y -> x + y) [1, 2, 3] [10, 20, 30]
 reduce (fun acc x -> acc + x) 0 [1, 2, 3, 4]
 scan (fun acc x -> acc + x) 0 [1, 2, 3, 4]
@@ -120,6 +121,7 @@ Several builtins iterate over rows of the leading axis:
 
 - `map` and `each`
 - `filter`
+- `table`
 - `zip`
 - `reduce`
 - `scan`
@@ -170,6 +172,7 @@ leading-axis slice.
 
 - `map`
 - `each`
+- `table`
 - `filter`
 - `zip`
 - `reduce`
