@@ -10,11 +10,14 @@ pub fn interpret(StringView) -> String raise UiuaMLError
 
 // Errors
 pub suberror UiuaMLError {
-  UiuaMLError(String)
+  UiuaMLError(String, String)
 } derive(Eq, @debug.Debug)
 pub impl Show for UiuaMLError
 
 // Types and methods
+type SourceLoc derive(Eq, @debug.Debug)
+
+type SourceSpan derive(Eq, @debug.Debug)
 
 // Type aliases
 

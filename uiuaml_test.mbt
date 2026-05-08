@@ -272,13 +272,47 @@ test "shape and index errors are more explicit" {
   } noraise {
     value => "unexpected ok: \{value}"
   }
-  assert_eq(shape_error, "pervasive operation shape mismatch: [2] vs [3]")
+  assert_eq(
+    shape_error,
+    (
+      #|pervasive operation shape mismatch: [2] vs [3]
+      #|  at 1:1
+      #|1 | [1, 2] + [1, 2, 3]
+      #|    ^^^^^^^^^^^^^^^^^^
+    ),
+  )
   let index_error = try interpret("pick 9 [1, 2]") catch {
     err => err.to_string()
   } noraise {
     value => "unexpected ok: \{value}"
   }
-  assert_eq(index_error, "pick index 9 is out of bounds for 2 rows")
+  assert_eq(
+    index_error,
+    (
+      #|pick index 9 is out of bounds for 2 rows
+      #|  at 1:1
+      #|1 | pick 9 [1, 2]
+      #|    ^^^^^^^^^^^^^
+    ),
+  )
+}
+
+///|
+test "parse errors also report source locations" {
+  let parse_error = try interpret("if true then 1") catch {
+    err => err.to_string()
+  } noraise {
+    value => "unexpected ok: \{value}"
+  }
+  assert_eq(
+    parse_error,
+    (
+      #|Expected else, got end of input
+      #|  at 1:15
+      #|1 | if true then 1
+      #|                  ^
+    ),
+  )
 }
 
 ///|

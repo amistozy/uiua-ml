@@ -35,11 +35,32 @@ priv enum TokenKind {
 priv struct Token {
   kind : TokenKind
   lexeme : String
+  span : SourceSpan
 }
 
 ///|
-fn token(kind : TokenKind, lexeme : String) -> Token {
-  { kind, lexeme }
+fn token(kind : TokenKind, lexeme : String, span : SourceSpan) -> Token {
+  { kind, lexeme, span }
+}
+
+///|
+fn make_loc(offset : Int, line : Int, col : Int) -> SourceLoc {
+  { offset, line, col }
+}
+
+///|
+fn make_span(
+  start_offset : Int,
+  start_line : Int,
+  start_col : Int,
+  end_offset : Int,
+  end_line : Int,
+  end_col : Int,
+) -> SourceSpan {
+  {
+    start: make_loc(start_offset, start_line, start_col),
+    end_: make_loc(end_offset, end_line, end_col),
+  }
 }
 
 ///|
@@ -47,84 +68,177 @@ fn tokenize(source : StringView) -> Array[Token] raise UiuaMLError {
   let tokens = Array::new()
   let len = source.length()
   let mut i = 0
+  let mut line = 1
+  let mut col = 1
   while i < len {
     let ch = source.unsafe_get(i).unsafe_to_char()
     if ch.is_whitespace() {
-      i = i + 1
+      if ch == '\n' {
+        i = i + 1
+        line = line + 1
+        col = 1
+      } else {
+        i = i + 1
+        col = col + 1
+      }
     } else if ch == '#' {
       i = i + 1
+      col = col + 1
       while i < len && source.unsafe_get(i).unsafe_to_char() != '\n' {
         i = i + 1
+        col = col + 1
       }
     } else if ch.is_digit(10) {
       let start = i
+      let start_line = line
+      let start_col = col
       i = i + 1
+      col = col + 1
       while i < len && source.unsafe_get(i).unsafe_to_char().is_digit(10) {
         i = i + 1
+        col = col + 1
       }
       if i < len && source.unsafe_get(i).unsafe_to_char() == '.' {
         i = i + 1
+        col = col + 1
         while i < len && source.unsafe_get(i).unsafe_to_char().is_digit(10) {
           i = i + 1
+          col = col + 1
         }
       }
-      tokens.push(token(TokenKind::Number, source[start:i].to_owned()))
+      tokens.push(
+        token(
+          TokenKind::Number,
+          source[start:i].to_owned(),
+          make_span(start, start_line, start_col, i, line, col),
+        ),
+      )
     } else if is_ident_start(ch) {
       let start = i
+      let start_line = line
+      let start_col = col
       i = i + 1
+      col = col + 1
       while i < len && is_ident_continue(source.unsafe_get(i).unsafe_to_char()) {
         i = i + 1
+        col = col + 1
       }
       let lexeme = source[start:i].to_owned()
-      tokens.push(token(keyword_or_ident(lexeme), lexeme))
+      tokens.push(
+        token(
+          keyword_or_ident(lexeme),
+          lexeme,
+          make_span(start, start_line, start_col, i, line, col),
+        ),
+      )
     } else {
+      let start = i
+      let start_line = line
+      let start_col = col
       if i + 1 < len {
         let pair = source[i:i + 2]
         if pair == "->" {
-          tokens.push(token(TokenKind::Arrow, "->"))
           i = i + 2
+          col = col + 2
+          tokens.push(
+            token(
+              TokenKind::Arrow,
+              "->",
+              make_span(start, start_line, start_col, i, line, col),
+            ),
+          )
           continue
         }
         if pair == "==" {
-          tokens.push(token(TokenKind::EqualEqual, "=="))
           i = i + 2
+          col = col + 2
+          tokens.push(
+            token(
+              TokenKind::EqualEqual,
+              "==",
+              make_span(start, start_line, start_col, i, line, col),
+            ),
+          )
           continue
         }
         if pair == "!=" {
-          tokens.push(token(TokenKind::BangEqual, "!="))
           i = i + 2
+          col = col + 2
+          tokens.push(
+            token(
+              TokenKind::BangEqual,
+              "!=",
+              make_span(start, start_line, start_col, i, line, col),
+            ),
+          )
           continue
         }
         if pair == "<=" {
-          tokens.push(token(TokenKind::LessEqual, "<="))
           i = i + 2
+          col = col + 2
+          tokens.push(
+            token(
+              TokenKind::LessEqual,
+              "<=",
+              make_span(start, start_line, start_col, i, line, col),
+            ),
+          )
           continue
         }
         if pair == ">=" {
-          tokens.push(token(TokenKind::GreaterEqual, ">="))
           i = i + 2
+          col = col + 2
+          tokens.push(
+            token(
+              TokenKind::GreaterEqual,
+              ">=",
+              make_span(start, start_line, start_col, i, line, col),
+            ),
+          )
           continue
         }
       }
-      match ch {
-        '(' => tokens.push(token(TokenKind::LParen, "("))
-        ')' => tokens.push(token(TokenKind::RParen, ")"))
-        '[' => tokens.push(token(TokenKind::LBracket, "["))
-        ']' => tokens.push(token(TokenKind::RBracket, "]"))
-        ',' => tokens.push(token(TokenKind::Comma, ","))
-        '=' => tokens.push(token(TokenKind::Equal, "="))
-        '+' => tokens.push(token(TokenKind::Plus, "+"))
-        '-' => tokens.push(token(TokenKind::Minus, "-"))
-        '*' => tokens.push(token(TokenKind::Star, "*"))
-        '/' => tokens.push(token(TokenKind::Slash, "/"))
-        '<' => tokens.push(token(TokenKind::Less, "<"))
-        '>' => tokens.push(token(TokenKind::Greater, ">"))
-        _ => fail("Unexpected character: \{ch}")
+      let kind = match ch {
+        '(' => Some(TokenKind::LParen)
+        ')' => Some(TokenKind::RParen)
+        '[' => Some(TokenKind::LBracket)
+        ']' => Some(TokenKind::RBracket)
+        ',' => Some(TokenKind::Comma)
+        '=' => Some(TokenKind::Equal)
+        '+' => Some(TokenKind::Plus)
+        '-' => Some(TokenKind::Minus)
+        '*' => Some(TokenKind::Star)
+        '/' => Some(TokenKind::Slash)
+        '<' => Some(TokenKind::Less)
+        '>' => Some(TokenKind::Greater)
+        _ => None
+      }
+      guard kind is Some(kind) else {
+        fail_at(
+          source,
+          make_span(
+            start,
+            start_line,
+            start_col,
+            start + 1,
+            start_line,
+            start_col + 1,
+          ),
+          "Unexpected character: \{ch}",
+        )
       }
       i = i + 1
+      col = col + 1
+      tokens.push(
+        token(
+          kind,
+          source[start:i].to_owned(),
+          make_span(start, start_line, start_col, i, line, col),
+        ),
+      )
     }
   }
-  tokens.push(token(TokenKind::Eof, ""))
+  tokens.push(token(TokenKind::Eof, "", make_span(i, line, col, i, line, col)))
   tokens
 }
 
@@ -155,7 +269,13 @@ fn keyword_or_ident(lexeme : String) -> TokenKind {
 }
 
 ///|
-priv enum Expr {
+priv struct Expr {
+  kind : ExprKind
+  span : SourceSpan
+}
+
+///|
+priv enum ExprKind {
   Number(Double)
   Bool(Bool)
   Var(String)
@@ -170,9 +290,15 @@ priv enum Expr {
 }
 
 ///|
+fn expr(kind : ExprKind, span : SourceSpan) -> Expr {
+  { kind, span }
+}
+
+///|
 priv struct Parser {
   tokens : Array[Token]
   mut pos : Int
+  source : String
 }
 
 ///|
@@ -207,7 +333,9 @@ fn Parser::expect(self : Parser, kind : TokenKind) -> Token raise UiuaMLError {
   if self.at(kind) {
     self.advance()
   } else {
-    fail(
+    fail_at(
+      self.source,
+      self.current().span,
       "Expected \{token_kind_name(kind)}, got \{token_kind_name(self.current().kind)}",
     )
   }
@@ -267,41 +395,50 @@ fn Parser::parse_expr(self : Parser) -> Expr raise UiuaMLError {
 
 ///|
 fn Parser::parse_fill(self : Parser) -> Expr raise UiuaMLError {
+  let keyword = self.tokens[self.pos - 1]
   let fill_value = self.parse_comparison()
   ignore(self.expect(TokenKind::In))
-  Expr::Fill(fill_value, self.parse_expr())
+  let body = self.parse_expr()
+  expr(ExprKind::Fill(fill_value, body), merge_spans(keyword.span, body.span))
 }
 
 ///|
 fn Parser::parse_let(self : Parser) -> Expr raise UiuaMLError {
+  let keyword = self.tokens[self.pos - 1]
   let name = self.expect(TokenKind::Ident).lexeme
   ignore(self.expect(TokenKind::Equal))
   let value = self.parse_expr()
   ignore(self.expect(TokenKind::In))
   let body = self.parse_expr()
-  Expr::Let(name, value, body)
+  expr(ExprKind::Let(name, value, body), merge_spans(keyword.span, body.span))
 }
 
 ///|
 fn Parser::parse_if(self : Parser) -> Expr raise UiuaMLError {
+  let keyword = self.tokens[self.pos - 1]
   let cond = self.parse_expr()
   ignore(self.expect(TokenKind::Then))
   let on_true = self.parse_expr()
   ignore(self.expect(TokenKind::Else))
   let on_false = self.parse_expr()
-  Expr::If(cond, on_true, on_false)
+  expr(
+    ExprKind::If(cond, on_true, on_false),
+    merge_spans(keyword.span, on_false.span),
+  )
 }
 
 ///|
 fn Parser::parse_fun(self : Parser) -> Expr raise UiuaMLError {
+  let keyword = self.tokens[self.pos - 1]
   let param = self.expect(TokenKind::Ident).lexeme
   ignore(self.expect(TokenKind::Arrow))
-  Expr::Fun(param, self.parse_expr())
+  let body = self.parse_expr()
+  expr(ExprKind::Fun(param, body), merge_spans(keyword.span, body.span))
 }
 
 ///|
 fn Parser::parse_comparison(self : Parser) -> Expr raise UiuaMLError {
-  let mut expr = self.parse_additive()
+  let mut left = self.parse_additive()
   while true {
     let op = match self.current().kind {
       TokenKind::EqualEqual => Some("==")
@@ -314,14 +451,18 @@ fn Parser::parse_comparison(self : Parser) -> Expr raise UiuaMLError {
     }
     guard op is Some(op) else { break }
     ignore(self.advance())
-    expr = Expr::Binary(op, expr, self.parse_additive())
+    let right = self.parse_additive()
+    left = expr(
+      ExprKind::Binary(op, left, right),
+      merge_spans(left.span, right.span),
+    )
   }
-  expr
+  left
 }
 
 ///|
 fn Parser::parse_additive(self : Parser) -> Expr raise UiuaMLError {
-  let mut expr = self.parse_multiplicative()
+  let mut left = self.parse_multiplicative()
   while true {
     let op = match self.current().kind {
       TokenKind::Plus => Some("+")
@@ -330,14 +471,18 @@ fn Parser::parse_additive(self : Parser) -> Expr raise UiuaMLError {
     }
     guard op is Some(op) else { break }
     ignore(self.advance())
-    expr = Expr::Binary(op, expr, self.parse_multiplicative())
+    let right = self.parse_multiplicative()
+    left = expr(
+      ExprKind::Binary(op, left, right),
+      merge_spans(left.span, right.span),
+    )
   }
-  expr
+  left
 }
 
 ///|
 fn Parser::parse_multiplicative(self : Parser) -> Expr raise UiuaMLError {
-  let mut expr = self.parse_application()
+  let mut left = self.parse_application()
   while true {
     let op = match self.current().kind {
       TokenKind::Star => Some("*")
@@ -346,18 +491,26 @@ fn Parser::parse_multiplicative(self : Parser) -> Expr raise UiuaMLError {
     }
     guard op is Some(op) else { break }
     ignore(self.advance())
-    expr = Expr::Binary(op, expr, self.parse_application())
+    let right = self.parse_application()
+    left = expr(
+      ExprKind::Binary(op, left, right),
+      merge_spans(left.span, right.span),
+    )
   }
-  expr
+  left
 }
 
 ///|
 fn Parser::parse_application(self : Parser) -> Expr raise UiuaMLError {
-  let mut expr = self.parse_unary()
+  let mut callee = self.parse_unary()
   while starts_expr(self.current().kind) {
-    expr = Expr::Call(expr, self.parse_unary())
+    let arg = self.parse_unary()
+    callee = expr(
+      ExprKind::Call(callee, arg),
+      merge_spans(callee.span, arg.span),
+    )
   }
-  expr
+  callee
 }
 
 ///|
@@ -381,7 +534,9 @@ fn starts_expr(kind : TokenKind) -> Bool {
 ///|
 fn Parser::parse_unary(self : Parser) -> Expr raise UiuaMLError {
   if self.eat(TokenKind::Minus) {
-    Expr::Unary("-", self.parse_unary())
+    let op = self.tokens[self.pos - 1]
+    let inner = self.parse_unary()
+    expr(ExprKind::Unary("-", inner), merge_spans(op.span, inner.span))
   } else {
     self.parse_primary()
   }
@@ -391,34 +546,43 @@ fn Parser::parse_unary(self : Parser) -> Expr raise UiuaMLError {
 fn Parser::parse_primary(self : Parser) -> Expr raise UiuaMLError {
   match self.current().kind {
     TokenKind::Number => {
-      let value = @string.parse_double(self.advance().lexeme) catch {
-        _ => fail("Invalid number literal")
+      let tok = self.advance()
+      let value = @string.parse_double(tok.lexeme) catch {
+        _ => fail_at(self.source, tok.span, "Invalid number literal")
       }
-      Expr::Number(value)
+      expr(ExprKind::Number(value), tok.span)
     }
     TokenKind::True => {
-      ignore(self.advance())
-      Expr::Bool(true)
+      let tok = self.advance()
+      expr(ExprKind::Bool(true), tok.span)
     }
     TokenKind::False => {
-      ignore(self.advance())
-      Expr::Bool(false)
+      let tok = self.advance()
+      expr(ExprKind::Bool(false), tok.span)
     }
-    TokenKind::Ident => Expr::Var(self.advance().lexeme)
+    TokenKind::Ident => {
+      let tok = self.advance()
+      expr(ExprKind::Var(tok.lexeme), tok.span)
+    }
     TokenKind::LParen => {
-      ignore(self.advance())
-      let expr = self.parse_expr()
-      ignore(self.expect(TokenKind::RParen))
-      expr
+      let left = self.advance()
+      let inner = self.parse_expr()
+      let right = self.expect(TokenKind::RParen)
+      expr(inner.kind, merge_spans(left.span, right.span))
     }
     TokenKind::LBracket => self.parse_array()
-    _ => fail("Unexpected token: \{token_kind_name(self.current().kind)}")
+    _ =>
+      fail_at(
+        self.source,
+        self.current().span,
+        "Unexpected token: \{token_kind_name(self.current().kind)}",
+      )
   }
 }
 
 ///|
 fn Parser::parse_array(self : Parser) -> Expr raise UiuaMLError {
-  ignore(self.expect(TokenKind::LBracket))
+  let left = self.expect(TokenKind::LBracket)
   let items = Array::new()
   if !self.at(TokenKind::RBracket) {
     items.push(self.parse_expr())
@@ -426,6 +590,6 @@ fn Parser::parse_array(self : Parser) -> Expr raise UiuaMLError {
       items.push(self.parse_expr())
     }
   }
-  ignore(self.expect(TokenKind::RBracket))
-  Expr::ArrayLit(items)
+  let right = self.expect(TokenKind::RBracket)
+  expr(ExprKind::ArrayLit(items), merge_spans(left.span, right.span))
 }

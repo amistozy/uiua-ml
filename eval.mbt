@@ -40,8 +40,8 @@ fn bind_builtin(env : Env, name : String, arity : Int) -> Env {
 }
 
 ///|
-fn eval(expr : Expr, env : Env) -> Value raise UiuaMLError {
-  eval_with_fill(expr, env, None)
+fn eval(expr : Expr, env : Env, source : StringView) -> Value raise UiuaMLError {
+  eval_with_fill(expr, env, None, source)
 }
 
 ///|
@@ -49,50 +49,60 @@ fn eval_with_fill(
   expr : Expr,
   env : Env,
   fill : Value?,
+  source : StringView,
 ) -> Value raise UiuaMLError {
-  match expr {
-    Expr::Number(n) => Value::Num(n)
-    Expr::Bool(b) => Value::Bool(b)
-    Expr::Var(name) =>
-      match env.get(name) {
-        Some(value) => value
-        None => fail("Unbound name: \{name}")
+  try {
+    match expr.kind {
+      ExprKind::Number(n) => Value::Num(n)
+      ExprKind::Bool(b) => Value::Bool(b)
+      ExprKind::Var(name) =>
+        match env.get(name) {
+          Some(value) => value
+          None => fail("Unbound name: \{name}")
+        }
+      ExprKind::ArrayLit(items) => {
+        let values = Array::new(capacity=items.length())
+        for item in items {
+          values.push(eval_with_fill(item, env, fill, source))
+        }
+        array_from_items(values)
       }
-    Expr::ArrayLit(items) => {
-      let values = Array::new(capacity=items.length())
-      for item in items {
-        values.push(eval_with_fill(item, env, fill))
+      ExprKind::Let(name, value_expr, body) => {
+        let next_env = env.add(
+          name,
+          eval_with_fill(value_expr, env, fill, source),
+        )
+        eval_with_fill(body, next_env, fill, source)
       }
-      array_from_items(values)
-    }
-    Expr::Let(name, value_expr, body) => {
-      let next_env = env.add(name, eval_with_fill(value_expr, env, fill))
-      eval_with_fill(body, next_env, fill)
-    }
-    Expr::Fill(fill_expr, body) => {
-      let fill_value = eval_with_fill(fill_expr, env, fill)
-      eval_with_fill(body, env, Some(fill_value))
-    }
-    Expr::If(cond, on_true, on_false) =>
-      if truthy(eval_with_fill(cond, env, fill)) {
-        eval_with_fill(on_true, env, fill)
-      } else {
-        eval_with_fill(on_false, env, fill)
+      ExprKind::Fill(fill_expr, body) => {
+        let fill_value = eval_with_fill(fill_expr, env, fill, source)
+        eval_with_fill(body, env, Some(fill_value), source)
       }
-    Expr::Fun(param, body) => Value::Closure({ param, body, env })
-    Expr::Call(callee, arg) =>
-      apply(
-        eval_with_fill(callee, env, fill),
-        eval_with_fill(arg, env, fill),
-        fill,
-      )
-    Expr::Unary(op, inner) => eval_unary(op, eval_with_fill(inner, env, fill))
-    Expr::Binary(op, lhs, rhs) =>
-      eval_binary(
-        op,
-        eval_with_fill(lhs, env, fill),
-        eval_with_fill(rhs, env, fill),
-      )
+      ExprKind::If(cond, on_true, on_false) =>
+        if truthy(eval_with_fill(cond, env, fill, source)) {
+          eval_with_fill(on_true, env, fill, source)
+        } else {
+          eval_with_fill(on_false, env, fill, source)
+        }
+      ExprKind::Fun(param, body) => Value::Closure({ param, body, env })
+      ExprKind::Call(callee, arg) =>
+        apply(
+          eval_with_fill(callee, env, fill, source),
+          eval_with_fill(arg, env, fill, source),
+          fill,
+          source,
+        )
+      ExprKind::Unary(op, inner) =>
+        eval_unary(op, eval_with_fill(inner, env, fill, source))
+      ExprKind::Binary(op, lhs, rhs) =>
+        eval_binary(
+          op,
+          eval_with_fill(lhs, env, fill, source),
+          eval_with_fill(rhs, env, fill, source),
+        )
+    }
+  } catch {
+    err => raise annotate_error(err, source, expr.span)
   }
 }
 
@@ -111,17 +121,18 @@ fn apply(
   fn_value : Value,
   arg : Value,
   fill : Value?,
+  source : StringView,
 ) -> Value raise UiuaMLError {
   match fn_value {
     Value::Closure(closure) => {
       let next_env = closure.env.add(closure.param, arg)
-      eval_with_fill(closure.body, next_env, fill)
+      eval_with_fill(closure.body, next_env, fill, source)
     }
     Value::Builtin(name, arity, captured) => {
       let args = captured.copy()
       args.push(arg)
       if args.length() == arity {
-        run_builtin(name, args, fill)
+        run_builtin(name, args, fill, source)
       } else {
         Value::Builtin(name, arity, args)
       }
@@ -315,14 +326,15 @@ fn run_builtin(
   name : String,
   args : Array[Value],
   fill : Value?,
+  source : StringView,
 ) -> Value raise UiuaMLError {
   match name {
     "range" | "iota" => builtin_range(args[0])
-    "map" | "each" => builtin_map(args[0], args[1], fill)
-    "filter" => builtin_filter(args[0], args[1], fill)
-    "zip" => builtin_zip(args[0], args[1], args[2], fill)
-    "reduce" => builtin_reduce(args[0], args[1], args[2], fill)
-    "scan" => builtin_scan(args[0], args[1], args[2], fill)
+    "map" | "each" => builtin_map(args[0], args[1], fill, source)
+    "filter" => builtin_filter(args[0], args[1], fill, source)
+    "zip" => builtin_zip(args[0], args[1], args[2], fill, source)
+    "reduce" => builtin_reduce(args[0], args[1], args[2], fill, source)
+    "scan" => builtin_scan(args[0], args[1], args[2], fill, source)
     "shape" => builtin_shape(args[0])
     "rank" => builtin_rank(args[0])
     "sum" => Value::Num(sum_numbers(args[0]))
@@ -403,18 +415,19 @@ fn builtin_map(
   fn_value : Value,
   arg : Value,
   fill : Value?,
+  source : StringView,
 ) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => {
       let mapped = Array::new(capacity=array.row_count())
       let mut row = 0
       while row < array.row_count() {
-        mapped.push(apply(fn_value, array.row_value(row), fill))
+        mapped.push(apply(fn_value, array.row_value(row), fill, source))
         row = row + 1
       }
       array_from_items(mapped)
     }
-    _ => apply(fn_value, arg, fill)
+    _ => apply(fn_value, arg, fill, source)
   }
 }
 
@@ -423,13 +436,14 @@ fn builtin_filter(
   fn_value : Value,
   arg : Value,
   fill : Value?,
+  source : StringView,
 ) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => {
       let selected = Array::new(capacity=array.row_count())
       let mut row = 0
       while row < array.row_count() {
-        if truthy(apply(fn_value, array.row_value(row), fill)) {
+        if truthy(apply(fn_value, array.row_value(row), fill, source)) {
           selected.push(row)
         }
         row = row + 1
@@ -446,8 +460,9 @@ fn apply_binary_fn(
   lhs : Value,
   rhs : Value,
   fill : Value?,
+  source : StringView,
 ) -> Value raise UiuaMLError {
-  apply(apply(fn_value, lhs, fill), rhs, fill)
+  apply(apply(fn_value, lhs, fill, source), rhs, fill, source)
 }
 
 ///|
@@ -456,6 +471,7 @@ fn builtin_zip(
   lhs : Value,
   rhs : Value,
   fill : Value?,
+  source : StringView,
 ) -> Value raise UiuaMLError {
   match (lhs, rhs) {
     (Value::Array(xs), Value::Array(ys)) =>
@@ -469,6 +485,7 @@ fn builtin_zip(
               xs.row_value(row),
               ys.row_value(row),
               fill,
+              source,
             ),
           )
           row = row + 1
@@ -479,7 +496,9 @@ fn builtin_zip(
         let zipped = Array::new(capacity=ys.row_count())
         let mut row = 0
         while row < ys.row_count() {
-          zipped.push(apply_binary_fn(fn_value, left, ys.row_value(row), fill))
+          zipped.push(
+            apply_binary_fn(fn_value, left, ys.row_value(row), fill, source),
+          )
           row = row + 1
         }
         array_from_items(zipped)
@@ -488,7 +507,9 @@ fn builtin_zip(
         let zipped = Array::new(capacity=xs.row_count())
         let mut row = 0
         while row < xs.row_count() {
-          zipped.push(apply_binary_fn(fn_value, xs.row_value(row), right, fill))
+          zipped.push(
+            apply_binary_fn(fn_value, xs.row_value(row), right, fill, source),
+          )
           row = row + 1
         }
         array_from_items(zipped)
@@ -501,7 +522,9 @@ fn builtin_zip(
       let zipped = Array::new(capacity=xs.row_count())
       let mut row = 0
       while row < xs.row_count() {
-        zipped.push(apply_binary_fn(fn_value, xs.row_value(row), scalar, fill))
+        zipped.push(
+          apply_binary_fn(fn_value, xs.row_value(row), scalar, fill, source),
+        )
         row = row + 1
       }
       array_from_items(zipped)
@@ -510,12 +533,14 @@ fn builtin_zip(
       let zipped = Array::new(capacity=ys.row_count())
       let mut row = 0
       while row < ys.row_count() {
-        zipped.push(apply_binary_fn(fn_value, scalar, ys.row_value(row), fill))
+        zipped.push(
+          apply_binary_fn(fn_value, scalar, ys.row_value(row), fill, source),
+        )
         row = row + 1
       }
       array_from_items(zipped)
     }
-    _ => apply_binary_fn(fn_value, lhs, rhs, fill)
+    _ => apply_binary_fn(fn_value, lhs, rhs, fill, source)
   }
 }
 
@@ -525,18 +550,24 @@ fn builtin_reduce(
   init : Value,
   arg : Value,
   fill : Value?,
+  source : StringView,
 ) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => {
       let mut acc = init
       let mut row = 0
       while row < array.row_count() {
-        acc = apply(apply(fn_value, acc, fill), array.row_value(row), fill)
+        acc = apply(
+          apply(fn_value, acc, fill, source),
+          array.row_value(row),
+          fill,
+          source,
+        )
         row = row + 1
       }
       acc
     }
-    _ => apply(apply(fn_value, init, fill), arg, fill)
+    _ => apply(apply(fn_value, init, fill, source), arg, fill, source)
   }
 }
 
@@ -546,6 +577,7 @@ fn builtin_scan(
   init : Value,
   arg : Value,
   fill : Value?,
+  source : StringView,
 ) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => {
@@ -556,13 +588,18 @@ fn builtin_scan(
       let mut acc = init
       let mut row = 0
       while row < array.row_count() {
-        acc = apply(apply(fn_value, acc, fill), array.row_value(row), fill)
+        acc = apply(
+          apply(fn_value, acc, fill, source),
+          array.row_value(row),
+          fill,
+          source,
+        )
         scanned.push(acc)
         row = row + 1
       }
       array_from_items(scanned)
     }
-    _ => apply(apply(fn_value, init, fill), arg, fill)
+    _ => apply(apply(fn_value, init, fill, source), arg, fill, source)
   }
 }
 
