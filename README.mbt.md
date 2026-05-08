@@ -4,34 +4,33 @@ UiuaML is a small experimental array language implemented in MoonBit.
 
 It is inspired by [Uiua](https://www.uiua.org/), but it uses an
 ML-flavored, expression-oriented syntax instead of Uiua's stack-based tacit
-notation. The project is intentionally compact: the goal is not to reproduce
-the full Uiua language, but to explore a practical subset of array programming
-with a flat array runtime, first-class functions, scoped fill semantics, and a
-growing collection of structural array operators.
+notation. The goal is not to reimplement all of Uiua. The goal is to explore a
+compact, practical subset of array programming with:
 
-## Overview
+- first-class functions
+- rectangular arrays
+- a flat row-major runtime
+- scoped fill semantics
+- shape-aware structural operators
 
-UiuaML currently supports:
+## Status
 
-- `let ... in ...` bindings
-- `fun x -> ...` anonymous functions
+UiuaML already supports a useful core language:
+
+- `let ... in ...`
+- `fun x -> ...`
 - function application
-- `if ... then ... else ...` expressions
-- `fill value in expr` scoped fill values for structural operations
-- dynamic runtime values:
-  - numbers
-  - booleans
-  - arrays
-  - closures
-  - builtins with partial application
+- `if ... then ... else ...`
+- `fill value in expr`
+- numbers, booleans, arrays, closures, and builtins
 - rectangular array literals such as `[1, 2, 3]` and `[[1, 2], [3, 4]]`
 - pervasive arithmetic and comparison
-- row-oriented higher-order combinators
-- structural array transforms
-- multi-dimensional `pick` and `select`
-- a small CLI for evaluating expressions and files
+- row-oriented higher-order array combinators
+- multi-dimensional indexing and selection
+- multi-axis structural transforms
+- a small CLI and a public `interpret` API
 
-## Quick Examples
+## Quick Tour
 
 ### Basic expressions
 
@@ -41,7 +40,7 @@ let add = fun x -> fun y -> x + y in add 3 4
 if sum [1, 1, 1] == 3 then 42 else 0
 ```
 
-### Arrays and broadcasting
+### Pervasive arithmetic
 
 ```text
 [1, 2, 3] + 10
@@ -57,28 +56,81 @@ filter (fun x -> x > 2) [1, 2, 3, 4, 5]
 zip (fun x -> fun y -> x + y) [1, 2, 3] [10, 20, 30]
 reduce (fun acc -> fun x -> acc + x) 0 [1, 2, 3, 4]
 scan (fun acc -> fun x -> acc + x) 0 [1, 2, 3, 4]
+keep [2, 1, 1] [1, 2, 3]
 ```
 
-### Structural array operations
+### Shape-driven programming
 
 ```text
+range 5
+range [2, 3]
 shape [[1, 2], [3, 4]]
+reshape [2, 3] [1, 2, 3, 4]
 transpose [[1, 2, 3], [4, 5, 6]]
 orient [1, 0] [[1, 2, 3], [4, 5, 6]]
-orient [-1] [[1, 2, 3], [4, 5, 6]]
-windows 3 [1, 2, 3, 4, 5]
+rotate [1, 2] (reshape [4, 5] (range 20))
+```
+
+### Indexing and selection
+
+```text
+pick 2 [8, 3, 9, 2, 0]
+pick [1, 1] [[1, 2, 3], [4, 5, 6]]
+select [0, 2, 1, 1] [[1, 2], [3, 4], [5, 6]]
 select (where [0, 1, 0, 1]) [2, 8, 3, 9]
-pick [[1, 2], [0, 1]] [[1, 2, 3], [4, 5, 6]]
 ```
 
 ### Fill scopes
 
 ```text
 fill 0 in take 5 [1, 2, 3]
-fill [9, 9] in select [0, 9, -1] [[1, 2], [3, 4]]
 fill 0 in reshape [2, 3] [1, 2, 3, 4]
-fill 0 in orient [0, 0] [1, 2, 3, 4]
+fill 0 in rotate [1, 2] (reshape [4, 5] (range 20))
+fill [9, 9] in select [0, 9, -1] [[1, 2], [3, 4]]
 ```
+
+## Core Ideas
+
+### Flat array runtime
+
+UiuaML uses a flat row-major representation.
+
+- every array has an explicit shape
+- leaf values live in one flat buffer
+- arrays must be rectangular
+
+This keeps the evaluator small and makes many structural operators easy to
+define in terms of shape and flat indexing.
+
+### Pervasion
+
+Binary arithmetic and comparison operators are pervasive.
+
+- scalars broadcast over arrays
+- arrays of the same shape combine element-wise
+- arrays also combine when one shape is a prefix of the other
+
+Examples:
+
+```text
+[1, 2, 3] + 10
+[1, 2, 3] + [10, 20, 30]
+[10, 20] + [[3, 4, 5], [6, 7, 8]]
+```
+
+### Rows as the default iteration unit
+
+Several builtins work row-wise along the leading axis.
+
+- `map` and `each` apply a function to each row
+- `filter` keeps rows whose predicate is truthy
+- `zip` combines rows from two values
+- `reduce` folds rows into an accumulator
+- `scan` returns intermediate accumulator states
+- `keep` repeats rows according to counts
+
+For vectors, a row is a single element. For higher-rank arrays, a row is a
+leading-axis slice.
 
 ## Builtins
 
@@ -128,83 +180,84 @@ fill 0 in orient [0, 0] [1, 2, 3, 4]
 - `scan`
 - `keep`
 
-## Array Model
+## Semantics Notes
 
-UiuaML uses a flat row-major representation:
+### `range`
 
-- every array has a shape
-- leaf values are stored in a single flat buffer
-- arrays must be rectangular
-
-This keeps the runtime simple and makes shape-driven operations much easier to
-define than a nested-list representation would.
-
-### Broadcasting
-
-Binary arithmetic and comparison operators are pervasive:
-
-- scalars broadcast over arrays
-- arrays of the same shape combine element-wise
-- arrays can also combine when one shape is a prefix of the other
-
-Examples:
+`range` supports both scalar and vector input.
 
 ```text
-[1, 2, 3] + 10
-[1, 2, 3] + [10, 20, 30]
-[10, 20] + [[3, 4, 5], [6, 7, 8]]
+range 5
+range -5
+range [3, 3]
+range [-2, 3]
 ```
 
-### Row-oriented combinators
+- a positive scalar creates `0 .. n-1`
+- a negative scalar creates `-1, -2, ...`
+- a vector creates a coordinate array
+- negative dimensions reverse that axis in coordinate space
 
-Several builtins operate along the leading axis:
+### `take`, `drop`, and `rotate`
 
-- `map` and `each` apply a function to each row
-- `filter` keeps rows whose predicate result is truthy
-- `zip` combines rows from two arrays
-- `reduce` folds rows into an accumulator
-- `scan` returns intermediate accumulator states
-
-For vectors, the rows are individual elements. For higher-rank arrays, the
-rows are leading-axis slices.
-
-## Selector Semantics
-
-### `pick`
-
-`pick` indexes into a value using a scalar index, a rank-1 index vector, or a
-higher-rank selector:
+These operators support both scalar and vector amounts.
 
 ```text
-pick 2 [8, 3, 9, 2, 0]
-pick [1, 1] [[1, 2, 3], [4, 5, 6]]
+take 3 [1, 2, 3, 4, 5]
+take [2, 3] (reshape [3, 4] (range 12))
+drop [-2, -2] (reshape [3, 3] (range 9))
+rotate [1, 2] (reshape [4, 5] (range 20))
+```
+
+With a vector amount, UiuaML applies the operation across multiple leading
+axes.
+
+### `keep`
+
+`keep` uses count semantics rather than only boolean filtering.
+
+```text
+keep 3 [1, 2, 3]
+keep [2, 1, 1] [1, 2, 3]
+keep [1, 0, 1] (range 10)
+fill [1, 2, 0] in keep [0, 4] (range 10)
+```
+
+- `0` drops a row
+- `1` keeps it once
+- `2` keeps it twice
+- scalar counts repeat every row equally
+- short count vectors repeat by default
+- inside a fill scope, the fill value supplies the repeating tail pattern
+
+### `pick` and `select`
+
+`pick` indexes into values, while `select` chooses rows from arrays.
+
+```text
 pick [[1, 2], [0, 1]] [[1, 2, 3], [4, 5, 6]]
-```
-
-When the selector rank is greater than `1`, each row of the selector is treated
-as an independent deeper index.
-
-### `select`
-
-`select` chooses rows from an array using a scalar selector, a vector of row
-indices, or a higher-rank selector:
-
-```text
-select 2 [8, 3, 9, 2, 0]
-select [0, 2, 1, 1] [[1, 2], [3, 4], [5, 6]]
 select [[0, 1], [1, 2], [2, 0]] [2, 3, 5, 7]
 ```
 
-Without a fill value, negative indices count from the end. With a fill value,
-out-of-bounds indices and negative indices in filled selection use the fill
-result instead.
+When the selector rank is greater than `1`, each selector row is treated as an
+independent deeper access.
 
-## Fill Semantics
+Without fill:
+
+- negative indices count from the end
+- out-of-bounds access raises an error
+
+With fill:
+
+- out-of-bounds indices yield the fill result
+- filled structural operations become total over a larger input space
+
+### Fill scopes
 
 `fill value in expr` installs a temporary fill value for structural operations
 inside `expr`.
 
-This currently affects operations such as:
+This currently affects:
 
 - `reshape`
 - `take`
@@ -214,21 +267,13 @@ This currently affects operations such as:
 - `rotate`
 - `windows`
 - `orient`
-
-Examples:
-
-```text
-fill 0 in take 5 [1, 2, 3]
-fill 0 in rotate 2 [1, 2, 3, 4, 5]
-fill [9, 9] in select [[0, 1], [9, -1]] [[1, 2], [3, 4]]
-fill 0 in orient [0, 1, 1] [[1, 2], [3, 4]]
-```
+- `keep`
 
 ## Syntax Notes
 
 ### Comments
 
-Line comments begin with `#`.
+Line comments start with `#`.
 
 ```text
 let xs = range 4 # build a vector
@@ -237,11 +282,12 @@ in sum xs
 
 ### Negative numbers
 
-Negative values work in normal expressions and builtin calls.
+Negative literals work directly in expressions and builtin arguments.
 
 ```text
 take -2 [1, 2, 3, 4, 5]
 drop -2 [1, 2, 3, 4, 5]
+range -5
 rotate -1 [[1, 2], [3, 4], [5, 6]]
 ```
 
@@ -276,7 +322,8 @@ The public entry point is:
 pub fn interpret(source : StringView) -> String raise UiuaMLError
 ```
 
-It tokenizes the source, parses it, evaluates it, and renders the final value.
+It tokenizes the source, parses it, evaluates it, and renders the resulting
+value.
 
 Example:
 
@@ -289,16 +336,11 @@ test "interpret an expression" {
 
 ## Project Layout
 
-- `uiuaml.mbt`
-  - public API and error type
-- `syntax.mbt`
-  - tokenizer, AST, and parser
-- `value.mbt`
-  - runtime values, array representation, rendering, and array helpers
-- `eval.mbt`
-  - evaluator, environments, pervasive operations, fill handling, and builtins
-- `cmd/main/main.mbt`
-  - command line interface
+- `uiuaml.mbt`: public API and error type
+- `syntax.mbt`: tokenizer, AST, and parser
+- `value.mbt`: runtime values, array storage, rendering, and shape helpers
+- `eval.mbt`: evaluator, environments, fill handling, and builtins
+- `cmd/main/main.mbt`: command line interface
 
 ## Development
 
@@ -310,12 +352,12 @@ moon fmt
 moon test
 ```
 
-## Scope and Non-Goals
+## Non-Goals
 
-UiuaML is still intentionally small. It does not currently aim to implement the
-full Uiua language, and several larger features remain out of scope for now:
+UiuaML is intentionally small. It currently does not aim to implement:
 
+- the full Uiua language
+- tacit stack syntax and modifiers
 - boxes and heterogeneous arrays
-- modifiers and tacit stack syntax
 - inversion and under-style transformations
 - modules and larger source-file language features
