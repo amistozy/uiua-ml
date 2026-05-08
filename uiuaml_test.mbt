@@ -107,8 +107,24 @@ test "arrays inspired by uiua" {
   assert_eq(try? interpret("deshape [[1, 2], [3, 4]]"), Ok("[1 2 3 4]"))
   assert_eq(try? interpret("take 3 [1, 2, 3, 4, 5]"), Ok("[1 2 3]"))
   assert_eq(try? interpret("take -2 [1, 2, 3, 4, 5]"), Ok("[4 5]"))
+  assert_eq(
+    try? interpret("take [2, 3] (reshape [3, 4] (range 12))"),
+    Ok("[[0 1 2] [4 5 6]]"),
+  )
+  assert_eq(
+    try? interpret("take [-2, -2] (reshape [3, 3] (range 9))"),
+    Ok("[[4 5] [7 8]]"),
+  )
   assert_eq(try? interpret("drop 3 [1, 2, 3, 4, 5]"), Ok("[4 5]"))
   assert_eq(try? interpret("drop -2 [1, 2, 3, 4, 5]"), Ok("[1 2 3]"))
+  assert_eq(
+    try? interpret("drop [1, 1] (reshape [2, 2] (range 4))"),
+    Ok("[[3]]"),
+  )
+  assert_eq(
+    try? interpret("drop [-2, -2] (reshape [3, 3] (range 9))"),
+    Ok("[[0]]"),
+  )
   assert_eq(try? interpret("pick 2 [3, 8, 4, 1]"), Ok("4"))
   assert_eq(try? interpret("pick [1, 1] [[1, 2, 3], [4, 5, 6]]"), Ok("5"))
   assert_eq(
@@ -163,6 +179,10 @@ test "arrays inspired by uiua" {
   assert_eq(
     try? interpret("rotate -1 [[1, 2], [3, 4], [5, 6]]"),
     Ok("[[5 6] [1 2] [3 4]]"),
+  )
+  assert_eq(
+    try? interpret("rotate [1, 2] (reshape [4, 5] (range 20))"),
+    Ok("[[7 8 9 5 6] [12 13 14 10 11] [17 18 19 15 16] [2 3 4 0 1]]"),
   )
   assert_eq(
     try? interpret("transpose [[1, 2, 3], [4, 5, 6]]"),
@@ -224,6 +244,14 @@ test "fill semantics for structural operations" {
   assert_eq(
     try? interpret("fill 0 in orient [0, 1, 1] [[1, 2], [3, 4]]"),
     Ok("[[[1 0] [0 2]] [[3 0] [0 4]]]"),
+  )
+  assert_eq(
+    try? interpret("fill 0 in take [3, 3] (reshape [2, 2] (range 4))"),
+    Ok("[[0 1 0] [2 3 0] [0 0 0]]"),
+  )
+  assert_eq(
+    try? interpret("fill 0 in rotate [1, 2] (reshape [4, 5] (range 20))"),
+    Ok("[[7 8 9 0 0] [12 13 14 0 0] [17 18 19 0 0] [0 0 0 0 0]]"),
   )
 }
 

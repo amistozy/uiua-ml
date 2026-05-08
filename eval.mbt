@@ -751,12 +751,22 @@ fn builtin_take(
   arg : Value,
   fill : Value?,
 ) -> Value raise UiuaMLError {
-  let n = as_int(amount)
+  let amounts = as_index_vector(amount, "take")
   match arg {
     Value::Array(array) => {
       let next = match fill {
-        Some(fill_value) => array.take_rows_filled(n, fill_value)
-        None => array.take_rows(n)
+        Some(fill_value) =>
+          if amounts.length() == 1 {
+            array.take_rows_filled(amounts[0], fill_value)
+          } else {
+            array.take_axes_filled(amounts, fill_value)
+          }
+        None =>
+          if amounts.length() == 1 {
+            array.take_rows(amounts[0])
+          } else {
+            array.take_axes(amounts)
+          }
       }
       Value::Array(next)
     }
@@ -770,12 +780,22 @@ fn builtin_drop(
   arg : Value,
   fill : Value?,
 ) -> Value raise UiuaMLError {
-  let n = as_int(amount)
+  let amounts = as_index_vector(amount, "drop")
   match arg {
     Value::Array(array) => {
       let next = match fill {
-        Some(fill_value) => array.drop_rows_filled(n, fill_value)
-        None => array.drop_rows(n)
+        Some(fill_value) =>
+          if amounts.length() == 1 {
+            array.drop_rows_filled(amounts[0], fill_value)
+          } else {
+            array.drop_axes_filled(amounts, fill_value)
+          }
+        None =>
+          if amounts.length() == 1 {
+            array.drop_rows(amounts[0])
+          } else {
+            array.drop_axes(amounts)
+          }
       }
       Value::Array(next)
     }
@@ -876,12 +896,22 @@ fn builtin_rotate(
   arg : Value,
   fill : Value?,
 ) -> Value raise UiuaMLError {
-  let n = as_int(amount)
+  let amounts = as_index_vector(amount, "rotate")
   match arg {
     Value::Array(array) => {
       let next = match fill {
-        Some(fill_value) => array.rotated_rows_filled(n, fill_value)
-        None => array.rotated_rows(n)
+        Some(fill_value) =>
+          if amounts.length() == 1 {
+            array.rotated_rows_filled(amounts[0], fill_value)
+          } else {
+            array.rotate_axes_filled(amounts, fill_value)
+          }
+        None =>
+          if amounts.length() == 1 {
+            array.rotated_rows(amounts[0])
+          } else {
+            array.rotate_axes(amounts)
+          }
       }
       Value::Array(next)
     }

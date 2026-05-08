@@ -379,6 +379,115 @@ fn UiArray::rotated_rows(self : UiArray, n : Int) -> UiArray {
 }
 
 ///|
+fn normalize_axis_amounts(
+  amounts : ArrayView[Int],
+  rank : Int,
+  op : StringView,
+) -> Array[Int] raise UiuaMLError {
+  guard amounts.length() <= rank else {
+    fail("\{op} expects at most \{rank} axis amounts")
+  }
+  amounts.to_owned()
+}
+
+///|
+fn take_axis_output_len(axis_len : Int, amount : Int, filled : Bool) -> Int {
+  if filled {
+    amount.abs()
+  } else {
+    amount.abs().min(axis_len)
+  }
+}
+
+///|
+fn take_axis_source_index(
+  axis_len : Int,
+  amount : Int,
+  out_index : Int,
+  filled : Bool,
+) -> Int? {
+  if amount >= 0 {
+    if filled && out_index >= axis_len {
+      None
+    } else {
+      Some(out_index)
+    }
+  } else if filled {
+    let missing = amount.abs() - axis_len
+    if out_index < missing {
+      None
+    } else {
+      Some(out_index - missing)
+    }
+  } else {
+    let count = amount.abs().min(axis_len)
+    Some(out_index + axis_len - count)
+  }
+}
+
+///|
+fn drop_axis_output_len(axis_len : Int, amount : Int) -> Int {
+  axis_len - amount.abs().min(axis_len)
+}
+
+///|
+fn drop_axis_source_index(
+  axis_len : Int,
+  amount : Int,
+  out_index : Int,
+  filled : Bool,
+) -> Int? {
+  let src_index = out_index + amount
+  if filled {
+    if src_index < 0 || src_index >= axis_len {
+      None
+    } else {
+      Some(src_index)
+    }
+  } else if amount >= 0 {
+    Some(out_index + amount.abs().min(axis_len))
+  } else {
+    Some(out_index)
+  }
+}
+
+///|
+fn rotate_axis_source_index(
+  axis_len : Int,
+  amount : Int,
+  out_index : Int,
+  filled : Bool,
+) -> Int? {
+  if axis_len == 0 {
+    return None
+  }
+  if filled {
+    let src_index = out_index + amount
+    if src_index < 0 || src_index >= axis_len {
+      None
+    } else {
+      Some(src_index)
+    }
+  } else {
+    Some((out_index + amount % axis_len + axis_len) % axis_len)
+  }
+}
+
+///|
+fn remap_fill_leaf(
+  fill_leafs : Array[Value],
+  suffix_shape : ArrayView[Int],
+  out_indices : ArrayView[Int],
+  prefix_rank : Int,
+) -> Value {
+  if suffix_shape.is_empty() {
+    fill_leafs[0]
+  } else {
+    fill_leafs[indices_to_flat(suffix_shape, out_indices[prefix_rank:])]
+  }
+}
+
+///|
 fn UiArray::take_rows(self : UiArray, n : Int) -> UiArray {
   if self.rank() == 0 {
     return if n == 0 { { shape: [0], data: [] } } else { self }
@@ -393,6 +502,101 @@ fn UiArray::take_rows(self : UiArray, n : Int) -> UiArray {
 }
 
 ///|
+fn UiArray::take_axes(
+  self : UiArray,
+  amounts : Array[Int],
+) -> UiArray raise UiuaMLError {
+  let amounts = normalize_axis_amounts(amounts, self.rank(), "take")
+  if amounts.is_empty() {
+    return self
+  }
+  let shape = self.shape.copy()
+  let mut axis = 0
+  while axis < amounts.length() {
+    shape[axis] = take_axis_output_len(self.shape[axis], amounts[axis], false)
+    axis = axis + 1
+  }
+  let data = Array::new(capacity=element_count_for_shape(shape))
+  let mut flat = 0
+  while flat < element_count_for_shape(shape) {
+    let out_indices = flat_to_indices(shape, flat)
+    let src_indices = out_indices.copy()
+    axis = 0
+    while axis < amounts.length() {
+      src_indices[axis] = match
+        take_axis_source_index(
+          self.shape[axis],
+          amounts[axis],
+          out_indices[axis],
+          false,
+        ) {
+        Some(src_index) => src_index
+        None => panic()
+      }
+      axis = axis + 1
+    }
+    data.push(self.data[indices_to_flat(self.shape, src_indices)])
+    flat = flat + 1
+  }
+  { shape, data }
+}
+
+///|
+fn UiArray::take_axes_filled(
+  self : UiArray,
+  amounts : Array[Int],
+  fill : Value,
+) -> UiArray raise UiuaMLError {
+  let amounts = normalize_axis_amounts(amounts, self.rank(), "take")
+  if amounts.is_empty() {
+    return self
+  }
+  let prefix_rank = amounts.length()
+  let suffix_shape = self.shape[prefix_rank:].to_owned()
+  let fill_value = fill_value_for_shape(suffix_shape, fill, "take")
+  let fill_leafs = flat_values(fill_value)
+  let shape = self.shape.copy()
+  let mut axis = 0
+  while axis < amounts.length() {
+    shape[axis] = take_axis_output_len(self.shape[axis], amounts[axis], true)
+    axis = axis + 1
+  }
+  let data = Array::new(capacity=element_count_for_shape(shape))
+  let mut flat = 0
+  while flat < element_count_for_shape(shape) {
+    let out_indices = flat_to_indices(shape, flat)
+    let src_indices = out_indices.copy()
+    let mut use_fill = false
+    axis = 0
+    while axis < amounts.length() {
+      match
+        take_axis_source_index(
+          self.shape[axis],
+          amounts[axis],
+          out_indices[axis],
+          true,
+        ) {
+        Some(src_index) => src_indices[axis] = src_index
+        None => {
+          use_fill = true
+          break
+        }
+      }
+      axis = axis + 1
+    }
+    if use_fill {
+      data.push(
+        remap_fill_leaf(fill_leafs, suffix_shape, out_indices, prefix_rank),
+      )
+    } else {
+      data.push(self.data[indices_to_flat(self.shape, src_indices)])
+    }
+    flat = flat + 1
+  }
+  { shape, data }
+}
+
+///|
 fn UiArray::drop_rows(self : UiArray, n : Int) -> UiArray {
   if self.rank() == 0 {
     return if n == 0 { self } else { { shape: [0], data: [] } }
@@ -404,6 +608,96 @@ fn UiArray::drop_rows(self : UiArray, n : Int) -> UiArray {
   } else {
     self.slice_rows(0, rows - count)
   }
+}
+
+///|
+fn UiArray::drop_axes(
+  self : UiArray,
+  amounts : Array[Int],
+) -> UiArray raise UiuaMLError {
+  let amounts = normalize_axis_amounts(amounts, self.rank(), "drop")
+  if amounts.is_empty() {
+    return self
+  }
+  let shape = self.shape.copy()
+  let mut axis = 0
+  while axis < amounts.length() {
+    shape[axis] = drop_axis_output_len(self.shape[axis], amounts[axis])
+    axis = axis + 1
+  }
+  let data = Array::new(capacity=element_count_for_shape(shape))
+  let mut flat = 0
+  while flat < element_count_for_shape(shape) {
+    let out_indices = flat_to_indices(shape, flat)
+    let src_indices = out_indices.copy()
+    axis = 0
+    while axis < amounts.length() {
+      src_indices[axis] = match
+        drop_axis_source_index(
+          self.shape[axis],
+          amounts[axis],
+          out_indices[axis],
+          false,
+        ) {
+        Some(src_index) => src_index
+        None => panic()
+      }
+      axis = axis + 1
+    }
+    data.push(self.data[indices_to_flat(self.shape, src_indices)])
+    flat = flat + 1
+  }
+  { shape, data }
+}
+
+///|
+fn UiArray::drop_axes_filled(
+  self : UiArray,
+  amounts : Array[Int],
+  fill : Value,
+) -> UiArray raise UiuaMLError {
+  let amounts = normalize_axis_amounts(amounts, self.rank(), "drop")
+  if amounts.is_empty() {
+    return self
+  }
+  let prefix_rank = amounts.length()
+  let suffix_shape = self.shape[prefix_rank:].to_owned()
+  let fill_value = fill_value_for_shape(suffix_shape, fill, "drop")
+  let fill_leafs = flat_values(fill_value)
+  let shape = self.shape
+  let data = Array::new(capacity=self.element_count())
+  let mut flat = 0
+  while flat < self.element_count() {
+    let out_indices = flat_to_indices(shape, flat)
+    let src_indices = out_indices.copy()
+    let mut use_fill = false
+    let mut axis = 0
+    while axis < amounts.length() {
+      match
+        drop_axis_source_index(
+          self.shape[axis],
+          amounts[axis],
+          out_indices[axis],
+          true,
+        ) {
+        Some(src_index) => src_indices[axis] = src_index
+        None => {
+          use_fill = true
+          break
+        }
+      }
+      axis = axis + 1
+    }
+    if use_fill {
+      data.push(
+        remap_fill_leaf(fill_leafs, suffix_shape, out_indices, prefix_rank),
+      )
+    } else {
+      data.push(self.data[indices_to_flat(self.shape, src_indices)])
+    }
+    flat = flat + 1
+  }
+  { shape, data }
 }
 
 ///|
@@ -799,6 +1093,91 @@ fn UiArray::drop_rows_filled(
   }
   validate_shape(self.shape, data.length())
   { shape: self.shape, data }
+}
+
+///|
+fn UiArray::rotate_axes(
+  self : UiArray,
+  amounts : Array[Int],
+) -> UiArray raise UiuaMLError {
+  let amounts = normalize_axis_amounts(amounts, self.rank(), "rotate")
+  if amounts.is_empty() {
+    return self
+  }
+  let shape = self.shape
+  let data = Array::new(capacity=self.element_count())
+  let mut flat = 0
+  while flat < self.element_count() {
+    let out_indices = flat_to_indices(shape, flat)
+    let src_indices = out_indices.copy()
+    let mut axis = 0
+    while axis < amounts.length() {
+      src_indices[axis] = match
+        rotate_axis_source_index(
+          self.shape[axis],
+          amounts[axis],
+          out_indices[axis],
+          false,
+        ) {
+        Some(src_index) => src_index
+        None => panic()
+      }
+      axis = axis + 1
+    }
+    data.push(self.data[indices_to_flat(self.shape, src_indices)])
+    flat = flat + 1
+  }
+  { shape, data }
+}
+
+///|
+fn UiArray::rotate_axes_filled(
+  self : UiArray,
+  amounts : Array[Int],
+  fill : Value,
+) -> UiArray raise UiuaMLError {
+  let amounts = normalize_axis_amounts(amounts, self.rank(), "rotate")
+  if amounts.is_empty() {
+    return self
+  }
+  let prefix_rank = amounts.length()
+  let suffix_shape = self.shape[prefix_rank:].to_owned()
+  let fill_value = fill_value_for_shape(suffix_shape, fill, "rotate")
+  let fill_leafs = flat_values(fill_value)
+  let shape = self.shape
+  let data = Array::new(capacity=self.element_count())
+  let mut flat = 0
+  while flat < self.element_count() {
+    let out_indices = flat_to_indices(shape, flat)
+    let src_indices = out_indices.copy()
+    let mut use_fill = false
+    let mut axis = 0
+    while axis < amounts.length() {
+      match
+        rotate_axis_source_index(
+          self.shape[axis],
+          amounts[axis],
+          out_indices[axis],
+          true,
+        ) {
+        Some(src_index) => src_indices[axis] = src_index
+        None => {
+          use_fill = true
+          break
+        }
+      }
+      axis = axis + 1
+    }
+    if use_fill {
+      data.push(
+        remap_fill_leaf(fill_leafs, suffix_shape, out_indices, prefix_rank),
+      )
+    } else {
+      data.push(self.data[indices_to_flat(self.shape, src_indices)])
+    }
+    flat = flat + 1
+  }
+  { shape, data }
 }
 
 ///|
