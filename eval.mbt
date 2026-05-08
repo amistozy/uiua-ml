@@ -340,7 +340,7 @@ fn run_builtin(
     "drop" => builtin_drop(args[0], args[1], fill)
     "pick" => builtin_pick(args[0], args[1], fill)
     "select" => builtin_select(args[0], args[1], fill)
-    "keep" => builtin_keep(args[0], args[1])
+    "keep" => builtin_keep(args[0], args[1], fill)
     "windows" => builtin_windows(args[0], args[1], fill)
     "orient" => builtin_orient(args[0], args[1], fill)
     "rotate" => builtin_rotate(args[0], args[1], fill)
@@ -829,20 +829,21 @@ fn builtin_select(
 }
 
 ///|
-fn builtin_keep(mask : Value, arg : Value) -> Value raise UiuaMLError {
-  let rows = keep_indices(mask)
+fn builtin_keep(
+  mask : Value,
+  arg : Value,
+  fill : Value?,
+) -> Value raise UiuaMLError {
   match arg {
     Value::Array(array) => {
-      guard rows.length() == array.row_count() else {
-        fail(
-          "keep mask length \{rows.length()} does not match \{array.row_count()} rows",
-        )
-      }
+      let rows = keep_counts(mask, array.row_count(), fill)
       let selected = Array::new()
       let mut i = 0
       while i < rows.length() {
-        if rows[i] {
+        let mut copies = 0
+        while copies < rows[i] {
           selected.push(i)
+          copies = copies + 1
         }
         i = i + 1
       }
@@ -928,16 +929,72 @@ fn builtin_transpose(arg : Value) -> Value raise UiuaMLError {
 }
 
 ///|
-fn keep_indices(mask : Value) -> Array[Bool] raise UiuaMLError {
-  match mask {
-    Value::Bool(b) => [b]
-    Value::Num(n) => [n != 0.0]
+fn count_pattern(
+  value : Value,
+  name : StringView,
+) -> Array[Int] raise UiuaMLError {
+  match value {
+    Value::Bool(b) => [if b { 1 } else { 0 }]
+    Value::Num(_) => {
+      let n = as_int(value)
+      guard n >= 0 else { fail("\{name} counts must be non-negative") }
+      [n]
+    }
     Value::Array(array) => {
       guard array.rank() <= 1 else {
-        fail("keep expects a boolean or numeric mask vector")
+        fail("\{name} expects a boolean or numeric count vector")
       }
-      array.data.map(truthy)
+      let counts = Array::new(capacity=array.element_count())
+      for item in array.data {
+        let count = match item {
+          Value::Bool(b) => if b { 1 } else { 0 }
+          Value::Num(_) => {
+            let n = as_int(item)
+            guard n >= 0 else { fail("\{name} counts must be non-negative") }
+            n
+          }
+          _ => fail("\{name} expects a boolean or numeric count vector")
+        }
+        counts.push(count)
+      }
+      counts
     }
-    _ => fail("keep expects a boolean or numeric mask vector")
+    _ => fail("\{name} expects a boolean or numeric count vector")
   }
+}
+
+///|
+fn keep_counts(
+  mask : Value,
+  row_count : Int,
+  fill : Value?,
+) -> Array[Int] raise UiuaMLError {
+  let pattern = count_pattern(mask, "keep")
+  guard !pattern.is_empty() else { fail("keep counts cannot be empty") }
+  if pattern.length() == 1 {
+    return Array::make(row_count, pattern[0])
+  }
+  let counts = Array::new(capacity=row_count)
+  let fill_pattern = match fill {
+    Some(fill_value) => Some(count_pattern(fill_value, "keep fill"))
+    None => None
+  }
+  guard fill_pattern != Some([]) else {
+    fail("keep fill counts cannot be empty")
+  }
+  let mut i = 0
+  while i < row_count {
+    let count = if i < pattern.length() {
+      pattern[i]
+    } else {
+      match fill_pattern {
+        Some(fill_counts) =>
+          fill_counts[(i - pattern.length()) % fill_counts.length()]
+        None => pattern[i % pattern.length()]
+      }
+    }
+    counts.push(count)
+    i = i + 1
+  }
+  counts
 }

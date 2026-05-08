@@ -147,6 +147,16 @@ test "arrays inspired by uiua" {
     try? interpret("keep [0, 1, 0, 1, 1, 0, 0] [2, 8, 3, 9, 1, 7, 2]"),
     Ok("[8 9 1]"),
   )
+  assert_eq(try? interpret("keep 3 [1, 2, 3]"), Ok("[1 1 1 2 2 2 3 3 3]"))
+  assert_eq(try? interpret("keep [2, 1, 1] [1, 2, 3]"), Ok("[1 1 2 3]"))
+  assert_eq(try? interpret("keep [1, 2, 1] [1, 2, 3]"), Ok("[1 2 2 3]"))
+  assert_eq(try? interpret("keep [1, 1, 2] [1, 2, 3]"), Ok("[1 2 3 3]"))
+  assert_eq(try? interpret("keep [3, 2, 1] [1, 2, 3]"), Ok("[1 1 1 2 2 3]"))
+  assert_eq(try? interpret("keep [1, 0, 1] (range 10)"), Ok("[0 2 3 5 6 8 9]"))
+  assert_eq(
+    try? interpret("fill [1, 2, 0] in keep [0, 4] (range 10)"),
+    Ok("[1 1 1 1 2 3 3 5 6 6 8 9 9]"),
+  )
   assert_eq(
     try? interpret("keep ([1, 0, 1] == 1) [[1, 2], [3, 4], [5, 6]]"),
     Ok("[[1 2] [5 6]]"),
