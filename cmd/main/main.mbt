@@ -1,35 +1,48 @@
 ///|
-fn main {
-  let eval_cmd = @argparse.Command(
-    "eval",
-    about="Evaluate a UiuaML expression from the command line",
-    positionals=[
-      @argparse.PositionArg(
-        "expr",
-        about="Expression to evaluate",
-        num_args=@argparse.ValueRange(lower=1),
-        allow_hyphen_values=true,
-      ),
-    ],
-  )
-  let run_cmd = @argparse.Command(
-    "run",
-    about="Read a UiuaML source file and evaluate it",
-    positionals=[
-      @argparse.PositionArg(
-        "path",
-        about="Path to a UiuaML source file",
-        num_args=@argparse.ValueRange::single(),
-        allow_hyphen_values=true,
-      ),
-    ],
-  )
-  let cmd = @argparse.Command(
+fn build_eval_cmd() -> @argparse.Command {
+  @argparse.Command("eval", about="Evaluate a single UiuaML expression.", positionals=[
+    @argparse.PositionArg(
+      "expr",
+      about="A UiuaML expression. Multiple shell arguments are joined with spaces.",
+      num_args=@argparse.ValueRange(lower=1),
+      allow_hyphen_values=true,
+    ),
+  ])
+}
+
+///|
+fn build_run_cmd() -> @argparse.Command {
+  @argparse.Command("run", about="Read a UiuaML source file and evaluate it.", positionals=[
+    @argparse.PositionArg(
+      "path",
+      about="Path to a UTF-8 text file containing a UiuaML program.",
+      num_args=@argparse.ValueRange::single(),
+      allow_hyphen_values=true,
+    ),
+  ])
+}
+
+///|
+fn build_cli() -> @argparse.Command {
+  @argparse.Command(
     "uiuaml",
-    about="UiuaML: an ML-like, dynamically typed array language inspired by Uiua",
+    about=(
+      #|UiuaML is a small experimental array language implemented in MoonBit.
+      #|
+      #|It uses an expression-oriented, ML-flavored syntax inspired by Uiua.
+      #|
+      #|Common commands:
+      #|  uiuaml eval "shape [[1, 2], [3, 4]]"
+      #|  uiuaml run program.ua
+    ),
     subcommand_required=true,
-    subcommands=[eval_cmd, run_cmd],
+    subcommands=[build_eval_cmd(), build_run_cmd()],
   )
+}
+
+///|
+fn main {
+  let cmd = build_cli()
   let matches = cmd.parse(argv=@env.args()[1:], env={}) catch {
     err => {
       println(err.to_string())
