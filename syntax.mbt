@@ -405,12 +405,33 @@ fn Parser::parse_fill(self : Parser) -> Expr raise UiuaMLError {
 ///|
 fn Parser::parse_let(self : Parser) -> Expr raise UiuaMLError {
   let keyword = self.tokens[self.pos - 1]
-  let name = self.expect(TokenKind::Ident).lexeme
+  let name_tok = self.expect(TokenKind::Ident)
+  let params = Array::new()
+  while self.at(TokenKind::Ident) {
+    params.push(self.advance())
+  }
   ignore(self.expect(TokenKind::Equal))
-  let value = self.parse_expr()
+  let mut value = self.parse_expr()
+  if !params.is_empty() {
+    let mut i = params.length() - 1
+    while i >= 0 {
+      let param = params[i]
+      value = expr(
+        ExprKind::Fun(param.lexeme, value),
+        merge_spans(param.span, value.span),
+      )
+      if i == 0 {
+        break
+      }
+      i = i - 1
+    }
+  }
   ignore(self.expect(TokenKind::In))
   let body = self.parse_expr()
-  expr(ExprKind::Let(name, value, body), merge_spans(keyword.span, body.span))
+  expr(
+    ExprKind::Let(name_tok.lexeme, value, body),
+    merge_spans(keyword.span, body.span),
+  )
 }
 
 ///|
@@ -430,10 +451,26 @@ fn Parser::parse_if(self : Parser) -> Expr raise UiuaMLError {
 ///|
 fn Parser::parse_fun(self : Parser) -> Expr raise UiuaMLError {
   let keyword = self.tokens[self.pos - 1]
-  let param = self.expect(TokenKind::Ident).lexeme
+  let params = Array::new()
+  params.push(self.expect(TokenKind::Ident))
+  while self.at(TokenKind::Ident) {
+    params.push(self.advance())
+  }
   ignore(self.expect(TokenKind::Arrow))
-  let body = self.parse_expr()
-  expr(ExprKind::Fun(param, body), merge_spans(keyword.span, body.span))
+  let mut body = self.parse_expr()
+  let mut i = params.length() - 1
+  while i >= 0 {
+    let param = params[i]
+    body = expr(
+      ExprKind::Fun(param.lexeme, body),
+      merge_spans(param.span, body.span),
+    )
+    if i == 0 {
+      break
+    }
+    i = i - 1
+  }
+  expr(body.kind, merge_spans(keyword.span, body.span))
 }
 
 ///|
@@ -587,6 +624,9 @@ fn Parser::parse_array(self : Parser) -> Expr raise UiuaMLError {
   if !self.at(TokenKind::RBracket) {
     items.push(self.parse_expr())
     while self.eat(TokenKind::Comma) {
+      if self.at(TokenKind::RBracket) {
+        break
+      }
       items.push(self.parse_expr())
     }
   }

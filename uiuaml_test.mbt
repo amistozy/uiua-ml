@@ -15,6 +15,9 @@ test "functions and lets" {
     try? interpret("let add = fun x -> fun y -> x + y in add 3 4"),
     Ok("7"),
   )
+  assert_eq(try? interpret("(fun x y -> x + y) 3 4"), Ok("7"))
+  assert_eq(try? interpret("let add x y = x + y in add 3 4"), Ok("7"))
+  assert_eq(try? interpret("let bias x y z = x + y + z in bias 1 2 3"), Ok("6"))
 }
 
 ///|
@@ -206,6 +209,8 @@ test "arrays inspired by uiua" {
     try? interpret("reshape [2, 3] [1, 2, 3, 4]"),
     Ok("[[1 2 3] [4 1 2]]"),
   )
+  assert_eq(try? interpret("[1, 2, 3,]"), Ok("[1 2 3]"))
+  assert_eq(try? interpret("let pair x y = [x, y,] in pair 3 4"), Ok("[3 4]"))
 }
 
 ///|
